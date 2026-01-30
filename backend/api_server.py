@@ -128,7 +128,7 @@ class StreamStore:
 
 
 settings = load_settings()
-app = FastAPI(title="trash-trade")
+app = FastAPI(title="trash-trade", root_path=settings.api.base_path or "")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.api.cors_allow_origins,

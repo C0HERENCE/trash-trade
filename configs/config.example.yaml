@@ -89,6 +89,7 @@ api:
   port: 8000
   cors_allow_origins: ["*"]
   ws_push_interval: "raw"   # "raw" for every update, or seconds like 5/10/15
+  base_path: ""              # e.g. "/app/trash-trade" when behind nginx subpath
 
 frontend:
   static_path: "./frontend/dist"

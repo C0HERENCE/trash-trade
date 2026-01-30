@@ -124,6 +124,7 @@ trash-trade/
 - `/ws/status`：账户与仓位状态
 - `/ws/stream`：15m K 线、实时指标（含斜率）、信号事件（二进制 msgpack+zlib）
 - 推送频率：`api.ws_push_interval`（`"raw"`=每次更新；或填秒数如 5/10/15）
+- 若通过子路径反向代理（如 `/app/trash-trade`），设置 `api.base_path=/app/trash-trade`，前端会自动按当前路径访问 API/WS。
 
 ---
 

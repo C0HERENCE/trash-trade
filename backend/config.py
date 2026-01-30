@@ -109,6 +109,7 @@ class ApiConfig(BaseModel):
     port: int = 8000
     cors_allow_origins: List[str] = Field(default_factory=lambda: ["*"])
     ws_push_interval: str = "raw"  # "raw" or seconds number as string
+    base_path: str = ""
 
 
 class FrontendConfig(BaseModel):
