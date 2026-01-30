@@ -111,8 +111,8 @@ trash-trade/
 ### 风险/冷却
 - `risk.max_position_notional`
 - `risk.max_position_pct_equity`
-- `risk.mmr_tiers`：维持保证金阶梯（notional_usdt / mmr / maint_amount），用于计算近似爆仓价
-- `risk.liquidation_buffer_pct`：默认 0，已被 mmr_tiers 取代（示例使用 Binance BTCUSDT 125x 档 MMR）
+- `risk.mmr_tiers`：维持保证金阶梯（notional_usdt / mmr / maint_amount），用于计算近似爆仓价（示例使用 Binance BTCUSDT 125x 档位，首档从 300k 开始；如有官方变更请在配置中调整）
+- `risk.liquidation_buffer_pct`：默认 0，已被 mmr_tiers 取代
 
 ### warmup 与缓存
 - `kline_cache.max_bars_15m / max_bars_1h`：环形缓冲上限
