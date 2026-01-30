@@ -101,11 +101,13 @@
       width: 100%;
       border-collapse: collapse;
       font-size: 12px;
+      table-layout: fixed;
     }
     th, td {
       padding: 8px;
       text-align: left;
       border-bottom: 1px solid #242a3a;
+      word-break: break-word;
     }
     th { color: var(--muted); font-weight: 500; }
     .long { background: rgba(126,231,135,0.15); color: var(--ok); }
@@ -132,6 +134,10 @@
     }
     .btn:hover {
       border-color: #3a4155;
+    }
+    .table-scroll {
+      width: 100%;
+      overflow-x: auto;
     }
     .checklist {
       display: grid;
@@ -212,19 +218,21 @@
         <h2>Recent Trades</h2>
         <button class="btn" id="refresh_trades">Refresh</button>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Type</th>
-            <th>Side</th>
-            <th>Price</th>
-            <th>Qty</th>
-            <th>Reason</th>
-          </tr>
-        </thead>
-        <tbody id="trades_body"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Type</th>
+              <th>Side</th>
+              <th>Price</th>
+              <th>Qty</th>
+              <th>Reason</th>
+            </tr>
+          </thead>
+          <tbody id="trades_body"></tbody>
+        </table>
+      </div>
     </div>
 
     <div class="card">
@@ -232,17 +240,19 @@
         <h2>Ledger</h2>
         <button class="btn" id="refresh_ledger">Refresh</button>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Type</th>
-            <th>Amount</th>
-            <th>Note</th>
-          </tr>
-        </thead>
-        <tbody id="ledger_body"></tbody>
-      </table>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Type</th>
+              <th>Amount</th>
+              <th>Note</th>
+            </tr>
+          </thead>
+          <tbody id="ledger_body"></tbody>
+        </table>
+      </div>
     </div>
   </main>
 
