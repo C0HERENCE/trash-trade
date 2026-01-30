@@ -71,6 +71,7 @@ class RuntimeEngine:
         self._prev2_macd_hist_15m: Optional[float] = None
         self._ind_1h: Optional[Indicators1h] = None
 
+        self._last_price: float = 0.0
         self._ws_task: Optional[asyncio.Task] = None
         self._funding_task: Optional[asyncio.Task] = None
 
@@ -511,6 +512,7 @@ class RuntimeEngine:
             return
         preview = self._indicators.preview_with_bar("15m", bar)
         if preview is None:
+            self._last_price = bar.close
             await self._update_status(bar.close)
             return
 
@@ -570,6 +572,7 @@ class RuntimeEngine:
         if action is not None:
             await self._close_by_action(action)
         await self._update_status(bar.close)
+        self._last_price = bar.close
 
     async def _open_position(self, signal: EntrySignal) -> None:
         if self._position is not None:
@@ -805,23 +808,25 @@ class RuntimeEngine:
         await self._stream_store.update_snapshot(
             last_signal={"type": "exit", "side": pos.side, "price": action.price, "ts": now_ms}
         )
-        await self._stream_store.add_event({"type": "trade", **trade_payload})
-        await self._alert.alert("INFO", action.action, f"@ {action.price}", action.action.lower())
-        self._position = None
+       await self._stream_store.add_event({"type": "trade", **trade_payload})
+       await self._alert.alert("INFO", action.action, f"@ {action.price}", action.action.lower())
+       self._position = None
 
-        # realized PnL ledger entry
-        await self._db.insert_ledger(
-            LedgerEntry(
-                timestamp=now_ms,
-                type="realized_pnl",
-                amount=realized,
-                currency="USDT",
-                symbol=self._settings.binance.symbol,
-                ref=str(trade_id),
-                note=action.reason,
-                created_at=now_ms,
-            )
-        )
+       # realized PnL ledger entry
+       await self._db.insert_ledger(
+           LedgerEntry(
+               timestamp=now_ms,
+               type="realized_pnl",
+               amount=realized,
+               currency="USDT",
+               symbol=self._settings.binance.symbol,
+               ref=str(trade_id),
+               note=action.reason,
+               created_at=now_ms,
+           )
+       )
+        # final funding check on close
+        await self._maybe_apply_funding(force=True, price_hint=action.price)
 
     def _calc_realized_pnl(self, pos: PositionState, price: float, qty: float) -> float:
         if pos.side == "LONG":
@@ -930,7 +935,7 @@ class RuntimeEngine:
                 logger.exception("Funding loop error")
             await asyncio.sleep(60)
 
-    async def _maybe_apply_funding(self) -> None:
+    async def _maybe_apply_funding(self, force: bool = False, price_hint: Optional[float] = None) -> None:
         if self._position is None:
             return
         try:
@@ -951,15 +956,15 @@ class RuntimeEngine:
         fr_time = int(fr["fundingTime"])
         rate = float(fr["fundingRate"])
         now_ms = int(time.time() * 1000)
-        if abs(now_ms - fr_time) > 3 * 60 * 1000:
+        if not force and abs(now_ms - fr_time) > 3 * 60 * 1000:
             return
         rows = await self._db.fetchall(
             "SELECT 1 FROM ledger WHERE type='funding' AND ref=? LIMIT 1", (str(fr_time),)
         )
-        if rows:
+        if rows and not force:
             return
 
-        price = self._position.entry_price
+        price = price_hint or self._last_price or self._position.entry_price
         notional = self._position.qty * price
         pnl = notional * rate * (1 if self._position.side == "LONG" else -1)
         self._account.balance += pnl
