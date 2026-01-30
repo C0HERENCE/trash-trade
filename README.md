@@ -48,7 +48,7 @@ trash-trade/
 - **做空允许**：close < EMA60 且 EMA20 < EMA60 且 RSI < 50
 - **趋势强度过滤**：abs(EMA20 - EMA60) / close ≥ `trend_strength_min`（默认 0.003，可配置）
 
-### 15m 入场（仅在 15m 收盘时评估）
+### 15m 入场（仅在 15m 收盘时评估；止盈止损实时评估）
 **多：**
 - low ≤ EMA20 且 close > EMA60
 - RSI 落在 [rsi_long_lower, rsi_long_upper]（默认 50–60），并且 RSI 斜率向上（可关闭）
@@ -104,13 +104,9 @@ trash-trade/
 - `strategy.trend_strength_min`
 - `strategy.atr_stop_mult`
 - `strategy.cooldown_after_stop`
-- `strategy.rsi_long_lower` / `rsi_long_upper`（默认 50–60）
-- `strategy.rsi_short_lower` / `rsi_short_upper`（默认 40–50）
-- `strategy.rsi_slope_required`（是否要求 RSI 斜率同向）
-  - 斜率定义：`RSI_current - RSI_prev`（上一根 15m 收盘值）
 - `strategy.rsi_long_lower` / `rsi_long_upper`（默认 50–60，避免过度超买追多）
 - `strategy.rsi_short_lower` / `rsi_short_upper`（默认 40–50，避免过度超卖追空）
-- `strategy.rsi_slope_required`：是否要求 RSI 斜率同向
+- `strategy.rsi_slope_required`（是否要求 RSI 斜率同向，斜率=当前 RSI - 上一根 RSI）
 
 ### 风险/冷却
 - `risk.max_position_notional`
@@ -129,6 +125,7 @@ trash-trade/
 
 ### API
 - `api.host / api.port`：服务地址
+- `GET /api/debug/state`：返回运行状态，可用 `?alert=true` 将状态发送到告警渠道
 
 ### 实时推送
 - `/ws/status`：账户与仓位状态
@@ -252,4 +249,4 @@ ALERTS__TELEGRAM__CHAT_ID=...
 - 重启恢复：若 SQLite 存在未平仓，直接从当前行情继续更新（不补算停机期间行情）
 
 ### 反向代理 / 子路径部署
-- 若通过 Nginx 等挂载到子路径（如 `/app/trash-trade/`），前端会自动以当前路径为前缀访问 API 与 WebSocket（无需额外修改）。
+- 若通过 Nginx 等挂载到子路径（如 `/app/trash-trade/`），前端会自动以当前路径为前缀访问 API 与 WebSocket；如果 `proxy_pass` 不剥前缀，可设置 `api.base_path=/app/trash-trade`。

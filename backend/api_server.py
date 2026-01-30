@@ -129,6 +129,19 @@ class StreamStore:
 
 settings = load_settings()
 app = FastAPI(title="trash-trade", root_path=settings.api.base_path or "")
+
+# Hooks injected from main/runtime
+runtime_state_provider = None  # callable returning dict
+runtime_alert_sender = None    # callable (level, title, message)
+ws_status_clients = 0
+ws_stream_clients = 0
+
+def set_runtime_hooks(state_cb=None, alert_cb=None):
+    global runtime_state_provider, runtime_alert_sender
+    if state_cb:
+        runtime_state_provider = state_cb
+    if alert_cb:
+        runtime_alert_sender = alert_cb
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.api.cors_allow_origins,
@@ -283,9 +296,60 @@ async def get_indicator_history(
     return {"items": series}
 
 
+@app.get("/api/debug/state")
+async def debug_state(alert: bool = False) -> Dict[str, Any]:
+    # Gather runtime state if provided
+    runtime_state = runtime_state_provider() if runtime_state_provider else {}
+
+    # Snapshot current ws counts
+    ws_info = {"status_clients": ws_status_clients, "stream_clients": ws_stream_clients}
+
+    # Latest status and indicators
+    s = await status_store.get()
+    snap = await stream_store.get_snapshot()
+    events = await stream_store.get_events(limit=10)
+
+    # DB latest rows
+    db = await _db()
+    latest_k15 = await db.fetchone(
+        "SELECT * FROM klines WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT 1",
+        (settings.binance.symbol, "15m"),
+    )
+    latest_k1h = await db.fetchone(
+        "SELECT * FROM klines WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT 1",
+        (settings.binance.symbol, "1h"),
+    )
+    latest_equity = await db.fetchone(
+        "SELECT * FROM equity_snapshots ORDER BY timestamp DESC LIMIT 1"
+    )
+    latest_pos = await db.get_open_position(settings.binance.symbol)
+    await db.close()
+
+    state = {
+        "status": _status_to_dict(s),
+        "stream_snapshot": _stream_to_dict(snap, events),
+        "ws": ws_info,
+        "runtime": runtime_state,
+        "db": {
+            "kline_15m": dict(latest_k15) if latest_k15 else None,
+            "kline_1h": dict(latest_k1h) if latest_k1h else None,
+            "equity": dict(latest_equity) if latest_equity else None,
+            "open_position": dict(latest_pos) if latest_pos else None,
+        },
+    }
+    if alert and runtime_alert_sender:
+        try:
+            await runtime_alert_sender("INFO", "DEBUG_STATE", json.dumps(state, default=str)[:1800])
+        except Exception:
+            logger.exception("Failed to send debug state alert")
+    return state
+
+
 @app.websocket("/ws/status")
 async def ws_status(websocket: WebSocket) -> None:
+    global ws_status_clients
     await websocket.accept()
+    ws_status_clients += 1
     try:
         interval = settings.api.ws_push_interval
         sleep_s: Optional[float] = None if interval == "raw" else float(interval)
@@ -306,11 +370,15 @@ async def ws_status(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             pass
+    finally:
+        ws_status_clients = max(0, ws_status_clients - 1)
 
 
 @app.websocket("/ws/stream")
 async def ws_stream(websocket: WebSocket) -> None:
+    global ws_stream_clients
     await websocket.accept()
+    ws_stream_clients += 1
     try:
         interval = settings.api.ws_push_interval
         sleep_s: Optional[float] = None if interval == "raw" else float(interval)
@@ -331,6 +399,8 @@ async def ws_stream(websocket: WebSocket) -> None:
             await websocket.close()
         except Exception:
             pass
+    finally:
+        ws_stream_clients = max(0, ws_stream_clients - 1)
 
 
 @app.get("/")

@@ -860,3 +860,20 @@ class RuntimeEngine:
                 free_margin=self._account.free_margin,
             )
         )
+
+    def runtime_state(self) -> dict:
+        return {
+            "buffers": {k: len(self._buffers.buffer(k)) for k in self._buffers.intervals()} if self._buffers else {},
+            "position": {
+                "side": self._position.side if self._position else None,
+                "qty": self._position.qty if self._position else None,
+                "entry": self._position.entry_price if self._position else None,
+            },
+            "cooldown_bars": self._cooldown_bars,
+        }
+
+    async def send_alert(self, level: str, title: str, message: str) -> None:
+        try:
+            await self._alert.alert(level, title, message)
+        except Exception:
+            logger.exception("Failed to send alert")
