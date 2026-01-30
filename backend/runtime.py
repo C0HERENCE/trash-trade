@@ -19,7 +19,7 @@ from .marketdata.buffer import (
 )
 from .marketdata.rest import BinanceRestClient, warmup_all
 from .marketdata.ws import BinanceWsClient, WsReconnectPolicy
-from .models import EquitySnapshot, Fee, PositionClose, PositionOpen, Trade, LedgerEntry
+from .models import EquitySnapshot, PositionClose, PositionOpen, Trade, LedgerEntry
 from .strategy import (
     EntrySignal,
     ExitAction,
@@ -633,17 +633,6 @@ class RuntimeEngine:
                 created_at=now_ms,
             )
         )
-        await self._db.insert_fee(
-            Fee(
-                timestamp=now_ms,
-                position_id=pos_id,
-                trade_id=trade_id,
-                fee_amount=fee,
-                fee_rate=self._settings.sim.fee_rate,
-                notional=notional,
-                created_at=now_ms,
-            )
-        )
         await self._db.insert_ledger(
             LedgerEntry(
                 timestamp=now_ms,
@@ -729,17 +718,6 @@ class RuntimeEngine:
                 fee_rate=self._settings.sim.fee_rate,
                 timestamp=now_ms,
                 reason=action.reason,
-                created_at=now_ms,
-            )
-        )
-        await self._db.insert_fee(
-            Fee(
-                timestamp=now_ms,
-                position_id=pos_id,
-                trade_id=trade_id,
-                fee_amount=fee,
-                fee_rate=self._settings.sim.fee_rate,
-                notional=notional,
                 created_at=now_ms,
             )
         )

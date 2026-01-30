@@ -82,6 +82,7 @@ class EquitySnapshot:
 
 @dataclass(slots=True)
 class Fee:
+    # Deprecated: kept for backward compat if old rows exist; no longer written.
     timestamp: int
     position_id: Optional[int]
     trade_id: Optional[int]

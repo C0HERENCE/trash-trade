@@ -98,28 +98,6 @@ CREATE TABLE IF NOT EXISTS equity_snapshots (
 CREATE INDEX IF NOT EXISTS idx_equity_snapshots_timestamp
   ON equity_snapshots(timestamp);
 
-CREATE TABLE IF NOT EXISTS fees (
-  fee_id INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp INTEGER NOT NULL,
-  position_id INTEGER,
-  trade_id INTEGER,
-  fee_amount REAL NOT NULL,
-  fee_rate REAL NOT NULL,
-  notional REAL NOT NULL,
-  created_at INTEGER NOT NULL,
-  FOREIGN KEY(position_id) REFERENCES positions(position_id),
-  FOREIGN KEY(trade_id) REFERENCES trades(trade_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_fees_timestamp
-  ON fees(timestamp);
-
-CREATE INDEX IF NOT EXISTS idx_fees_position
-  ON fees(position_id);
-
-CREATE INDEX IF NOT EXISTS idx_fees_trade
-  ON fees(trade_id);
-
 CREATE TABLE IF NOT EXISTS alerts (
   alert_id INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp INTEGER NOT NULL,

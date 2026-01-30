@@ -249,6 +249,7 @@ ALERTS__TELEGRAM__CHAT_ID=...
 - 实盘下单未接入，仅模拟成交
 - 告警发送失败不影响主循环
 - 重启恢复：若 SQLite 存在未平仓，直接从当前行情继续更新（不补算停机期间行情）
+- fees 表已弃用，流水统一写入 ledger；旧库如仍有 fees，可迁移后手动执行 `DROP TABLE fees;`
 
 ### 反向代理 / 子路径部署
 - 若通过 Nginx 等挂载到子路径（如 `/app/trash-trade/`），前端会自动以当前路径为前缀访问 API 与 WebSocket；如果 `proxy_pass` 不剥前缀，可设置 `api.base_path=/app/trash-trade`。

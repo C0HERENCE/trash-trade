@@ -220,25 +220,6 @@ class Database:
         await self._conn.commit()
         return int(cursor.lastrowid)
 
-    async def insert_fee(self, f: Fee) -> int:
-        sql = """
-        INSERT INTO fees (timestamp, position_id, trade_id, fee_amount, fee_rate, notional, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """
-        params = (
-            f.timestamp,
-            f.position_id,
-            f.trade_id,
-            f.fee_amount,
-            f.fee_rate,
-            f.notional,
-            f.created_at,
-        )
-        await self.connect()
-        cursor = await self._conn.execute(sql, params)
-        await self._conn.commit()
-        return int(cursor.lastrowid)
-
     async def insert_alert(self, a: Alert) -> int:
         sql = """
         INSERT INTO alerts (timestamp, channel, level, message, dedup_key, created_at)
@@ -293,27 +274,6 @@ class Database:
         if where:
             sql += " WHERE " + " AND ".join(where)
         sql += " ORDER BY entry_time DESC LIMIT ?"
-        params.append(limit)
-        return await self.fetchall(sql, params)
-
-    async def get_fees(
-        self,
-        limit: int = 100,
-        since: Optional[int] = None,
-        until: Optional[int] = None,
-    ) -> List[aiosqlite.Row]:
-        sql = "SELECT * FROM fees"
-        params: List[Any] = []
-        where: List[str] = []
-        if since is not None:
-            where.append("timestamp >= ?")
-            params.append(since)
-        if until is not None:
-            where.append("timestamp <= ?")
-            params.append(until)
-        if where:
-            sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY timestamp DESC LIMIT ?"
         params.append(limit)
         return await self.fetchall(sql, params)
 
