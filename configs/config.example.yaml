@@ -25,8 +25,25 @@ sim:
 risk:
   max_position_notional: 20000.0   # absolute cap
   max_position_pct_equity: 1.0     # 1.0 = 100% equity
-  liquidation_buffer_pct: 0.02     # extra margin buffer
+  liquidation_buffer_pct: 0.0      # deprecated when using mmr_tiers; keep 0
   allow_reduce_only: true
+  mmr_tiers:
+    # Sorted by notional_usdt ascending; first tier that position notional <= notional_usdt is selected
+    - notional_usdt: 5000
+      mmr: 0.004       # 0.4%
+      maint_amount: 0
+    - notional_usdt: 50000
+      mmr: 0.004       # 0.4%
+      maint_amount: 0
+    - notional_usdt: 250000
+      mmr: 0.005       # 0.5%
+      maint_amount: 50
+    - notional_usdt: 1000000
+      mmr: 0.010       # 1.0%
+      maint_amount: 900
+    - notional_usdt: 1000000000    # fallback large tier
+      mmr: 0.025
+      maint_amount: 10000
 
 indicators:
   rsi:

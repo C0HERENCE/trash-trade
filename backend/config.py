@@ -38,8 +38,17 @@ class SimConfig(BaseModel):
 class RiskConfig(BaseModel):
     max_position_notional: float = 20000.0
     max_position_pct_equity: float = 1.0
-    liquidation_buffer_pct: float = 0.02
+    liquidation_buffer_pct: float = 0.0
     allow_reduce_only: bool = True
+    mmr_tiers: List[Dict[str, float]] = Field(
+        default_factory=lambda: [
+            {"notional_usdt": 5000, "mmr": 0.004, "maint_amount": 0},
+            {"notional_usdt": 50000, "mmr": 0.004, "maint_amount": 0},
+            {"notional_usdt": 250000, "mmr": 0.005, "maint_amount": 50},
+            {"notional_usdt": 1000000, "mmr": 0.01, "maint_amount": 900},
+            {"notional_usdt": 1_000_000_000, "mmr": 0.025, "maint_amount": 10000},
+        ]
+    )
 
 
 class IndicatorConfig(BaseModel):

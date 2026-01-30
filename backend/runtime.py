@@ -808,11 +808,32 @@ class RuntimeEngine:
         return (pos.entry_price - price) * qty
 
     def _calc_liq_price(self, entry_price: float, side: str) -> float:
+        # Binance-like isolated estimate: margin + PnL = maint_margin
         lev = self._settings.sim.max_leverage
-        buffer_pct = self._settings.risk.liquidation_buffer_pct
+        qty = self._position.qty if self._position else 0.0
+        if qty <= 0:
+            return entry_price
+        notional_entry = entry_price * qty
+        mmr, maint_amt = self._select_mmr(notional_entry)
+        margin = notional_entry / lev
         if side == "LONG":
-            return entry_price * (1.0 - 1.0 / lev + buffer_pct)
-        return entry_price * (1.0 + 1.0 / lev - buffer_pct)
+            # margin + (Pliq - entry)*qty = Pliq*qty*mmr + maint_amt
+            num = margin - entry_price * qty - maint_amt
+            denom = (mmr - 1.0) * qty
+            return num / denom if denom != 0 else entry_price
+        else:  # SHORT
+            # margin + (entry - Pliq)*qty = Pliq*qty*mmr + maint_amt
+            num = margin + entry_price * qty - maint_amt
+            denom = (1.0 + mmr) * qty
+            return num / denom if denom != 0 else entry_price
+
+    def _select_mmr(self, notional: float) -> tuple[float, float]:
+        tiers = sorted(self._settings.risk.mmr_tiers, key=lambda x: x["notional_usdt"])
+        for t in tiers:
+            if notional <= t["notional_usdt"]:
+                return float(t["mmr"]), float(t.get("maint_amount", 0.0))
+        last = tiers[-1]
+        return float(last["mmr"]), float(last.get("maint_amount", 0.0))
 
     async def _update_status(self, price: float) -> None:
         upl = 0.0
