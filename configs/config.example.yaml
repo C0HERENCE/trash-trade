@@ -28,22 +28,41 @@ risk:
   liquidation_buffer_pct: 0.0      # deprecated when using mmr_tiers; keep 0
   allow_reduce_only: true
   mmr_tiers:
-    # Sorted by notional_usdt ascending; first tier that position notional <= notional_usdt is selected
-    - notional_usdt: 5000
-      mmr: 0.004       # 0.4%
+    # Binance BTCUSDT USDT-M (125x bracket) approximation, source: public leverage bracket tables
+    # Sorted ascending; first tier where notional <= notional_usdt is used
+    - notional_usdt: 50000       # 0-50k
+      mmr: 0.0040                # 0.40%
       maint_amount: 0
-    - notional_usdt: 50000
-      mmr: 0.004       # 0.4%
+    - notional_usdt: 250000      # 50k-250k
+      mmr: 0.0050                # 0.50%
       maint_amount: 0
-    - notional_usdt: 250000
-      mmr: 0.005       # 0.5%
-      maint_amount: 50
-    - notional_usdt: 1000000
-      mmr: 0.010       # 1.0%
-      maint_amount: 900
-    - notional_usdt: 1000000000    # fallback large tier
-      mmr: 0.025
-      maint_amount: 10000
+    - notional_usdt: 1000000     # 250k-1m
+      mmr: 0.0100                # 1.00%
+      maint_amount: 0
+    - notional_usdt: 5000000     # 1m-5m
+      mmr: 0.0250                # 2.50%
+      maint_amount: 0
+    - notional_usdt: 20000000    # 5m-20m
+      mmr: 0.0500                # 5.00%
+      maint_amount: 0
+    - notional_usdt: 50000000    # 20m-50m
+      mmr: 0.1000                # 10.00%
+      maint_amount: 0
+    - notional_usdt: 100000000   # 50m-100m
+      mmr: 0.1250                # 12.50%
+      maint_amount: 0
+    - notional_usdt: 200000000   # 100m-200m
+      mmr: 0.1500                # 15.00%
+      maint_amount: 0
+    - notional_usdt: 300000000   # 200m-300m
+      mmr: 0.2500                # 25.00%
+      maint_amount: 0
+    - notional_usdt: 500000000   # 300m-500m
+      mmr: 0.5000                # 50.00%
+      maint_amount: 0
+    - notional_usdt: 1000000000  # fallback
+      mmr: 0.5000
+      maint_amount: 0
 
 indicators:
   rsi:
