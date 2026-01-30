@@ -226,6 +226,13 @@
 
   <script>
     const el = (id) => document.getElementById(id);
+    const basePath = (() => {
+      const path = window.location.pathname;
+      if (path.endsWith('/')) return path.slice(0, -1);
+      const idx = path.lastIndexOf('/');
+      return idx >= 0 ? path.slice(0, idx) : '';
+    })();
+    const api = (p) => `${basePath}${p}`;
     const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4);
     const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--';
 
@@ -276,7 +283,7 @@
     }
 
     async function loadTrades() {
-      const res = await fetch('/api/trades?limit=20');
+      const res = await fetch(api('/api/trades?limit=20'));
       const data = await res.json();
       const rows = (data.items || []).map(t => {
         const ts = fmtTs(t.timestamp);
@@ -295,7 +302,7 @@
     }
 
     async function loadHistory() {
-      const res = await fetch('/api/klines?interval=15m&limit=500');
+      const res = await fetch(api('/api/klines?interval=15m&limit=500'));
       const data = await res.json();
       const items = data.items || [];
       const candles = items.map(k => ({
@@ -309,7 +316,7 @@
     }
 
     async function loadIndicatorHistory() {
-      const res = await fetch('/api/indicator_history?interval=15m&limit=500');
+      const res = await fetch(api('/api/indicator_history?interval=15m&limit=500'));
       const data = await res.json();
       const items = data.items || [];
       const ema20 = [];
@@ -455,7 +462,7 @@
 
     function initWs() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      wsStream = new WebSocket(`${proto}://${location.host}/ws/stream`);
+      wsStream = new WebSocket(`${proto}://${location.host}${basePath}/ws/stream`);
       wsStream.binaryType = 'arraybuffer';
       wsStream.onmessage = async (ev) => {
         const payload = await decodeMessage(ev.data);
@@ -466,7 +473,7 @@
 
     function initStatusWs() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      wsStatus = new WebSocket(`${proto}://${location.host}/ws/status`);
+      wsStatus = new WebSocket(`${proto}://${location.host}${basePath}/ws/status`);
       wsStatus.binaryType = 'arraybuffer';
       wsStatus.onmessage = async (ev) => {
         const payload = await decodeMessage(ev.data);
