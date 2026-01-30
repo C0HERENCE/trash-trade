@@ -644,6 +644,18 @@ class RuntimeEngine:
                 created_at=now_ms,
             )
         )
+        await self._db.insert_ledger(
+            LedgerEntry(
+                timestamp=now_ms,
+                type="fee",
+                amount=-fee,
+                currency="USDT",
+                symbol=self._settings.binance.symbol,
+                ref=str(trade_id),
+                note="entry fee",
+                created_at=now_ms,
+            )
+        )
 
         await self._stream_store.add_event(
             {
@@ -731,6 +743,18 @@ class RuntimeEngine:
                 created_at=now_ms,
             )
         )
+        await self._db.insert_ledger(
+            LedgerEntry(
+                timestamp=now_ms,
+                type="fee",
+                amount=-fee,
+                currency="USDT",
+                symbol=self._settings.binance.symbol,
+                ref=str(trade_id),
+                note="exit fee",
+                created_at=now_ms,
+            )
+        )
 
         trade_payload = {
             "trade_id": trade_id,
@@ -806,6 +830,20 @@ class RuntimeEngine:
         await self._stream_store.add_event({"type": "trade", **trade_payload})
         await self._alert.alert("INFO", action.action, f"@ {action.price}", action.action.lower())
         self._position = None
+
+        # realized PnL ledger entry
+        await self._db.insert_ledger(
+            LedgerEntry(
+                timestamp=now_ms,
+                type="realized_pnl",
+                amount=realized,
+                currency="USDT",
+                symbol=self._settings.binance.symbol,
+                ref=str(trade_id),
+                note=action.reason,
+                created_at=now_ms,
+            )
+        )
 
     def _calc_realized_pnl(self, pos: PositionState, price: float, qty: float) -> float:
         if pos.side == "LONG":
