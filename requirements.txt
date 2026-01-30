@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+aiosqlite
+httpx
+websockets
+pydantic
+pydantic-settings
+PyYAML
+msgpack

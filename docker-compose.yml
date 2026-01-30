@@ -1,0 +1,11 @@
+version: "3.8"
+services:
+  trash-trade:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./configs:/app/configs
+      - ./db:/app/db
+    environment:
+      - APP__ENV=prod

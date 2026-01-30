@@ -1,0 +1,89 @@
+# Example configuration for trash-trade
+# Copy to configs/config.yaml and override with env vars where needed.
+
+app:
+  env: dev
+  timezone: UTC
+  log_level: INFO
+
+binance:
+  rest_base: "https://fapi.binance.com"
+  ws_base: "wss://fstream.binance.com"
+  symbol: "BTCUSDT"
+  intervals: ["15m", "1h"]
+  ws_reconnect:
+    max_retries: 0         # 0 means infinite
+    base_delay_ms: 500
+    max_delay_ms: 10000
+
+sim:
+  initial_capital: 1000.0
+  max_leverage: 20
+  fee_rate: 0.0004
+  slippage: 0.0
+
+risk:
+  max_position_notional: 20000.0   # absolute cap
+  max_position_pct_equity: 1.0     # 1.0 = 100% equity
+  liquidation_buffer_pct: 0.02     # extra margin buffer
+  allow_reduce_only: true
+
+indicators:
+  rsi:
+    length: 14
+  ema_fast:
+    length: 12
+  ema_slow:
+    length: 26
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  atr:
+    length: 14
+  ema_trend:
+    fast: 20
+    slow: 60
+
+strategy:
+  trend_strength_min: 0.003
+  atr_stop_mult: 1.5
+  cooldown_after_stop: 4
+
+cooldown:
+  enabled: true
+  bars_after_exit: 2
+  min_ms_after_exit: 900000        # 15m
+
+kline_cache:
+  max_bars_15m: 2000
+  max_bars_1h: 2000
+  warmup_extra_bars: 200
+  warmup_buffer_mult: 3.0
+
+alerts:
+  enabled: true
+  dedup_ttl_ms: 300000
+  telegram:
+    enabled: false
+    token: ""
+    chat_id: ""
+  bark:
+    enabled: false
+    url: ""
+    key: ""
+  wecom:
+    enabled: false
+    webhook: ""
+
+storage:
+  sqlite_path: "./db/app.db"
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  cors_allow_origins: ["*"]
+
+frontend:
+  static_path: "./frontend/dist"
+  dev_server_url: "http://localhost:5173"

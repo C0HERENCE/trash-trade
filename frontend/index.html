@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Trash-Trade Dashboard</title>
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/msgpack-lite@0.1.26/dist/msgpack.min.js"></script>
+  <script src="https://unpkg.com/pako@2.1.0/dist/pako.min.js"></script>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #171a21;
+      --text: #e6e9ef;
+      --muted: #9aa4b2;
+      --accent: #5cc8ff;
+      --danger: #ff6b6b;
+      --ok: #7ee787;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+    }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: radial-gradient(1200px 800px at 20% 10%, #1b1f2a, #0f1115);
+      color: var(--text);
+      overflow-x: hidden;
+      overflow-y: auto;
+    }
+    header {
+      padding: 16px 24px;
+      border-bottom: 1px solid #222634;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    @media (max-width: 900px) {
+      header {
+        flex-direction: column;
+        gap: 10px;
+        align-items: flex-start;
+      }
+      main {
+        padding: 16px;
+      }
+    }
+    h1 {
+      font-size: 18px;
+      margin: 0;
+      letter-spacing: 0.5px;
+    }
+    main {
+      padding: 20px 24px 40px;
+      display: grid;
+      gap: 16px;
+      grid-template-columns: 1fr;
+      max-width: 100%;
+    }
+    .grid {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    }
+    @media (max-width: 800px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid #232838;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 10px 20px rgba(0,0,0,0.25);
+      min-width: 0;
+    }
+    .card h2 {
+      font-size: 13px;
+      color: var(--muted);
+      margin: 0 0 8px;
+    }
+    .stat {
+      font-size: 22px;
+      font-weight: 600;
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      margin: 6px 0;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .row span.value { color: var(--text); }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      padding: 8px;
+      text-align: left;
+      border-bottom: 1px solid #242a3a;
+    }
+    th { color: var(--muted); font-weight: 500; }
+    .long { background: rgba(126,231,135,0.15); color: var(--ok); }
+    .short { background: rgba(255,107,107,0.15); color: var(--danger); }
+
+    #chart { height: clamp(220px, 40vh, 420px); width: 100%; }
+    #subchart { height: clamp(140px, 22vh, 220px); width: 100%; }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .btn {
+      background: #232838;
+      color: var(--text);
+      border: 1px solid #2d3242;
+      padding: 6px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .btn:hover {
+      border-color: #3a4155;
+    }
+    .checklist {
+      display: grid;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .check {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .ok .dot { background: var(--ok); }
+    .bad .dot { background: var(--danger); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Trash-Trade / BTCUSDT</h1>
+    <div class="row">
+      <span class="value" id="countdown">--:--</span>
+      <button class="btn" id="ws_connect" style="margin-left:10px;">Connect</button>
+    </div>
+  </header>
+  <main>
+    <div class="grid">
+      <div class="card">
+        <h2>Equity</h2>
+        <div class="stat" id="equity">--</div>
+        <div class="row"><span>Balance</span><span class="value" id="balance">--</span></div>
+        <div class="row"><span>UPL</span><span class="value" id="upl">--</span></div>
+        <div class="row"><span>Margin Used</span><span class="value" id="margin">--</span></div>
+        <div class="row"><span>Free Margin</span><span class="value" id="free_margin">--</span></div>
+      </div>
+      <div class="card">
+        <h2>Position</h2>
+        <div class="stat" id="pos_side">--</div>
+        <div class="row"><span>Qty</span><span class="value" id="pos_qty">--</span></div>
+        <div class="row"><span>Entry</span><span class="value" id="pos_entry">--</span></div>
+        <div class="row"><span>Stop</span><span class="value" id="pos_stop">--</span></div>
+        <div class="row"><span>TP1</span><span class="value" id="pos_tp1">--</span></div>
+        <div class="row"><span>TP2</span><span class="value" id="pos_tp2">--</span></div>
+        <div class="row"><span>LIQ</span><span class="value" id="pos_liq">--</span></div>
+      </div>
+      <div class="card">
+        <h2>Runtime</h2>
+        <div class="row"><span>Cooldown Bars</span><span class="value" id="cooldown">--</span></div>
+        <div class="row"><span>Last Update</span><span class="value" id="last_ts">--</span></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>15m Kline + EMA</h2>
+      <div id="chart"></div>
+    </div>
+
+    <div class="card">
+      <h2>MACD Hist + RSI</h2>
+      <div id="subchart"></div>
+    </div>
+
+    <div class="card">
+      <h2>Entry Conditions</h2>
+      <div class="row"><span>Long</span></div>
+      <div id="cond_long" class="checklist"></div>
+      <div class="row" style="margin-top:10px;"><span>Short</span></div>
+      <div id="cond_short" class="checklist"></div>
+    </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2>Recent Trades</h2>
+        <button class="btn" id="refresh_trades">Refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Side</th>
+            <th>Price</th>
+            <th>Qty</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody id="trades_body"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const el = (id) => document.getElementById(id);
+    const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4);
+    const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--';
+
+    const chartEl = document.getElementById('chart');
+    const subEl = document.getElementById('subchart');
+    const chart = LightweightCharts.createChart(chartEl, {
+      layout: { background: { color: '#171a21' }, textColor: '#e6e9ef' },
+      grid: { vertLines: { color: '#242a3a' }, horzLines: { color: '#242a3a' } },
+      rightPriceScale: { borderColor: '#242a3a' },
+      timeScale: { borderColor: '#242a3a' },
+    });
+    const candleSeries = chart.addCandlestickSeries();
+    const ema20Series = chart.addLineSeries({ color: '#5cc8ff', lineWidth: 1 });
+    const ema60Series = chart.addLineSeries({ color: '#ffb86c', lineWidth: 1 });
+
+    const sub = LightweightCharts.createChart(subEl, {
+      layout: { background: { color: '#171a21' }, textColor: '#e6e9ef' },
+      grid: { vertLines: { color: '#242a3a' }, horzLines: { color: '#242a3a' } },
+      rightPriceScale: { borderColor: '#242a3a' },
+      timeScale: { borderColor: '#242a3a' },
+    });
+    const macdSeries = sub.addHistogramSeries({ color: '#7ee787' });
+    const rsiSeries = sub.addLineSeries({ color: '#ff6b6b', lineWidth: 1 });
+
+    let markers = [];
+    const eventKeys = new Set();
+
+    function updateStatus(data) {
+      el('equity').textContent = fmt(data.equity);
+      el('balance').textContent = fmt(data.balance);
+      el('upl').textContent = fmt(data.upl);
+      el('margin').textContent = fmt(data.margin_used);
+      el('free_margin').textContent = fmt(data.free_margin);
+      el('pos_liq').textContent = fmt(data.liq_price);
+
+      const pos = data.position || {};
+      const side = pos.side || '--';
+      el('pos_side').textContent = side;
+      el('pos_side').className = 'stat ' + (side === 'LONG' ? 'long' : (side === 'SHORT' ? 'short' : ''));
+      el('pos_qty').textContent = fmt(pos.qty);
+      el('pos_entry').textContent = fmt(pos.entry_price);
+      el('pos_stop').textContent = fmt(pos.stop_price);
+      el('pos_tp1').textContent = fmt(pos.tp1_price);
+      el('pos_tp2').textContent = fmt(pos.tp2_price);
+
+      el('cooldown').textContent = data.cooldown_bars ?? '--';
+      el('last_ts').textContent = fmtTs(data.timestamp);
+    }
+
+    async function loadTrades() {
+      const res = await fetch('/api/trades?limit=20');
+      const data = await res.json();
+      const rows = (data.items || []).map(t => {
+        const ts = fmtTs(t.timestamp);
+        const type = t.trade_type || '';
+        const side = t.side || '';
+        return `<tr>
+          <td>${ts}</td>
+          <td>${type}</td>
+          <td>${side}</td>
+          <td>${fmt(t.price)}</td>
+          <td>${fmt(t.qty)}</td>
+          <td>${t.reason || ''}</td>
+        </tr>`;
+      }).join('');
+      el('trades_body').innerHTML = rows;
+    }
+
+    async function loadHistory() {
+      const res = await fetch('/api/klines?interval=15m&limit=500');
+      const data = await res.json();
+      const items = data.items || [];
+      const candles = items.map(k => ({
+        time: Math.floor(k.open_time / 1000),
+        open: k.open,
+        high: k.high,
+        low: k.low,
+        close: k.close,
+      }));
+      candleSeries.setData(candles);
+    }
+
+    async function loadIndicatorHistory() {
+      const res = await fetch('/api/indicator_history?interval=15m&limit=500');
+      const data = await res.json();
+      const items = data.items || [];
+      const ema20 = [];
+      const ema60 = [];
+      const macd = [];
+      const rsi = [];
+      items.forEach(i => {
+        if (i.ema20 !== null && i.ema20 !== undefined) {
+          ema20.push({ time: i.time, value: i.ema20 });
+          ema60.push({ time: i.time, value: i.ema60 });
+          macd.push({ time: i.time, value: i.macd_hist, color: i.macd_hist >= 0 ? '#7ee787' : '#ff6b6b' });
+          rsi.push({ time: i.time, value: i.rsi14 });
+        }
+      });
+      ema20Series.setData(ema20);
+      ema60Series.setData(ema60);
+      macdSeries.setData(macd);
+      rsiSeries.setData(rsi);
+    }
+
+    function addMarker(ev) {
+      const key = `${ev.type}-${ev.side}-${ev.ts}-${ev.price ?? ''}`;
+      if (eventKeys.has(key)) return;
+      eventKeys.add(key);
+      const time = Math.floor(ev.ts / 1000);
+      const side = ev.side === 'LONG' ? 'buy' : 'sell';
+      const color = ev.type === 'entry' ? '#7ee787' : '#ff6b6b';
+      const shape = ev.type === 'entry' ? 'arrowUp' : 'arrowDown';
+      markers.push({ time, position: side === 'buy' ? 'belowBar' : 'aboveBar', color, shape, text: ev.type });
+      candleSeries.setMarkers(markers);
+    }
+
+    function updateStream(payload) {
+      if (payload.k) {
+        const k = payload.k;
+        const bar = {
+          time: Math.floor(k.t / 1000),
+          open: k.o,
+          high: k.h,
+          low: k.l,
+          close: k.c,
+        };
+        candleSeries.update(bar);
+      }
+      if (payload.i15) {
+        const t = payload.k ? Math.floor(payload.k.t / 1000) : null;
+        if (t) {
+          ema20Series.update({ time: t, value: payload.i15.ema20 });
+          ema60Series.update({ time: t, value: payload.i15.ema60 });
+          macdSeries.update({ time: t, value: payload.i15.macd_hist, color: payload.i15.macd_hist >= 0 ? '#7ee787' : '#ff6b6b' });
+          rsiSeries.update({ time: t, value: payload.i15.rsi14 });
+        }
+      }
+      if (payload.ev && payload.ev.length) {
+        payload.ev.forEach(addMarker);
+      }
+      if (payload.sig && payload.sig.t === 'cond') {
+        const conds = payload.sig.c || {};
+        const render = (list) => {
+          if (!list || !list.length) return '<div class="check ok"><span class="dot"></span>OK</div>';
+          return list.map(c => {
+            const cls = c.ok ? 'ok' : 'bad';
+            const value = (c.value !== undefined && c.value !== null) ? ` | v=${Number(c.value).toFixed(4)}` : '';
+            const target = c.target ? ` | target=${c.target}` : '';
+            const slope = (c.slope !== undefined && c.slope !== null) ? ` | slope=${Number(c.slope).toFixed(4)}` : '';
+            const info = c.info ? ` | ${c.info}` : '';
+            return `<div class="check ${cls}"><span class="dot"></span><span>${c.label}${value}${target}${slope}${info}</span></div>`;
+          }).join('');
+        };
+        el('cond_long').innerHTML = render(conds.long);
+        el('cond_short').innerHTML = render(conds.short);
+      }
+      if (payload.events && payload.events.length) {
+        const tradeEvents = payload.events.filter(e => e.type === 'trade');
+        if (tradeEvents.length) {
+          const rows = tradeEvents.map(t => {
+            const ts = fmtTs(t.timestamp);
+            const type = t.trade_type || '';
+            const side = t.side || '';
+            return `<tr>
+              <td>${ts}</td>
+              <td>${type}</td>
+              <td>${side}</td>
+              <td>${fmt(t.price)}</td>
+              <td>${fmt(t.qty)}</td>
+              <td>${t.reason || ''}</td>
+            </tr>`;
+          }).join('');
+          el('trades_body').innerHTML = rows;
+        }
+      }
+    }
+
+    async function decodeMessage(data) {
+      if (typeof data === 'string') {
+        try { return JSON.parse(data); } catch { return null; }
+      }
+      let buf;
+      if (data instanceof Blob) {
+        buf = new Uint8Array(await data.arrayBuffer());
+      } else if (data instanceof ArrayBuffer) {
+        buf = new Uint8Array(data);
+      } else {
+        return null;
+      }
+      try {
+        const inflated = window.pako.inflate(buf);
+        return window.msgpack.decode(inflated);
+      } catch {
+        return null;
+      }
+    }
+
+    let wsStream = null;
+    let wsStatus = null;
+    let countdownTimer = null;
+    let remainingSec = 600;
+
+    function renderCountdown() {
+      const m = String(Math.floor(remainingSec / 60)).padStart(2, '0');
+      const s = String(remainingSec % 60).padStart(2, '0');
+      el('countdown').textContent = `${m}:${s}`;
+    }
+
+    function stopStreams() {
+      if (wsStream) { try { wsStream.close(); } catch {} wsStream = null; }
+      if (wsStatus) { try { wsStatus.close(); } catch {} wsStatus = null; }
+      if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+    }
+
+    function startCountdown() {
+      remainingSec = 600;
+      renderCountdown();
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        remainingSec -= 1;
+        renderCountdown();
+        if (remainingSec <= 0) {
+          stopStreams();
+        }
+      }, 1000);
+    }
+
+    function initWs() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      wsStream = new WebSocket(`${proto}://${location.host}/ws/stream`);
+      wsStream.binaryType = 'arraybuffer';
+      wsStream.onmessage = async (ev) => {
+        const payload = await decodeMessage(ev.data);
+        if (payload) updateStream(payload);
+      };
+      wsStream.onclose = () => {};
+    }
+
+    function initStatusWs() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      wsStatus = new WebSocket(`${proto}://${location.host}/ws/status`);
+      wsStatus.binaryType = 'arraybuffer';
+      wsStatus.onmessage = async (ev) => {
+        const payload = await decodeMessage(ev.data);
+        if (payload) updateStatus(payload);
+      };
+      wsStatus.onclose = () => {};
+    }
+
+    function resizeCharts() {
+      const w1 = chartEl.getBoundingClientRect().width;
+      const h1 = chartEl.getBoundingClientRect().height;
+      const w2 = subEl.getBoundingClientRect().width;
+      const h2 = subEl.getBoundingClientRect().height;
+      if (w1 > 0 && h1 > 0) chart.resize(Math.floor(w1), Math.floor(h1));
+      if (w2 > 0 && h2 > 0) sub.resize(Math.floor(w2), Math.floor(h2));
+    }
+
+    el('refresh_trades').addEventListener('click', loadTrades);
+    el('ws_connect').addEventListener('click', () => {
+      stopStreams();
+      initWs();
+      initStatusWs();
+      startCountdown();
+    });
+
+    loadHistory();
+    loadIndicatorHistory();
+    loadTrades();
+    renderCountdown();
+    initWs();
+    initStatusWs();
+    startCountdown();
+    resizeCharts();
+    window.addEventListener('resize', resizeCharts);
+    const ro = new ResizeObserver(() => resizeCharts());
+    ro.observe(chartEl);
+    ro.observe(subEl);
+  </script>
+</body>
+</html>
