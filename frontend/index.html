@@ -32,9 +32,13 @@
       color: var(--text);
       overflow-x: hidden;
       overflow-y: auto;
+      padding-top: env(safe-area-inset-top, 0);
+      padding-bottom: env(safe-area-inset-bottom, 0);
+      padding-left: env(safe-area-inset-left, 0);
+      padding-right: env(safe-area-inset-right, 0);
     }
     header {
-      padding: 16px 24px;
+      padding: calc(16px + env(safe-area-inset-top, 0)) calc(24px + env(safe-area-inset-right, 0)) 16px calc(24px + env(safe-area-inset-left, 0));
       border-bottom: 1px solid #222634;
       display: flex;
       align-items: center;
