@@ -808,23 +808,23 @@ class RuntimeEngine:
         await self._stream_store.update_snapshot(
             last_signal={"type": "exit", "side": pos.side, "price": action.price, "ts": now_ms}
         )
-       await self._stream_store.add_event({"type": "trade", **trade_payload})
-       await self._alert.alert("INFO", action.action, f"@ {action.price}", action.action.lower())
-       self._position = None
+        await self._stream_store.add_event({"type": "trade", **trade_payload})
+        await self._alert.alert("INFO", action.action, f"@ {action.price}", action.action.lower())
+        self._position = None
 
-       # realized PnL ledger entry
-       await self._db.insert_ledger(
-           LedgerEntry(
-               timestamp=now_ms,
-               type="realized_pnl",
-               amount=realized,
-               currency="USDT",
-               symbol=self._settings.binance.symbol,
-               ref=str(trade_id),
-               note=action.reason,
-               created_at=now_ms,
-           )
-       )
+        # realized PnL ledger entry
+        await self._db.insert_ledger(
+            LedgerEntry(
+                timestamp=now_ms,
+                type="realized_pnl",
+                amount=realized,
+                currency="USDT",
+                symbol=self._settings.binance.symbol,
+                ref=str(trade_id),
+                note=action.reason,
+                created_at=now_ms,
+            )
+        )
         # final funding check on close
         await self._maybe_apply_funding(force=True, price_hint=action.price)
 
