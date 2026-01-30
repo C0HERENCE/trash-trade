@@ -99,3 +99,15 @@ class Alert:
     message: str
     dedup_key: Optional[str]
     created_at: int
+
+
+@dataclass(slots=True)
+class LedgerEntry:
+    timestamp: int
+    type: str        # fee / realized_pnl / funding
+    amount: float
+    currency: str
+    symbol: Optional[str]
+    ref: Optional[str]
+    note: Optional[str]
+    created_at: int

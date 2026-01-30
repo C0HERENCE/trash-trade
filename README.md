@@ -127,6 +127,7 @@ trash-trade/
 ### API
 - `api.host / api.port`：服务地址
 - `GET /api/debug/state`：返回运行状态，可用 `?alert=true` 将状态发送到告警渠道
+- `GET /api/ledger`：流水（手续费/平仓盈亏/资金费率）
 
 ### 实时推送
 - `/ws/status`：账户与仓位状态

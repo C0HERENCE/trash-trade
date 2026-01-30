@@ -142,4 +142,22 @@ CREATE TABLE IF NOT EXISTS app_state (
   updated_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ledger (
+  ledger_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp INTEGER NOT NULL,
+  type TEXT NOT NULL,            -- fee / realized_pnl / funding
+  amount REAL NOT NULL,          -- positive = credit, negative = debit
+  currency TEXT NOT NULL DEFAULT 'USDT',
+  symbol TEXT,
+  ref TEXT,                      -- e.g. position_id or funding time
+  note TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_timestamp
+  ON ledger(timestamp);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_type
+  ON ledger(type);
+
 COMMIT;

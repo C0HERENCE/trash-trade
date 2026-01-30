@@ -222,6 +222,24 @@
         <tbody id="trades_body"></tbody>
       </table>
     </div>
+
+    <div class="card">
+      <div class="toolbar">
+        <h2>Ledger</h2>
+        <button class="btn" id="refresh_ledger">Refresh</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Amount</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody id="ledger_body"></tbody>
+      </table>
+    </div>
   </main>
 
   <script>
@@ -335,6 +353,23 @@
       ema60Series.setData(ema60);
       macdSeries.setData(macd);
       rsiSeries.setData(rsi);
+    }
+
+    async function loadLedger() {
+      const res = await fetch(api('/api/ledger?limit=20'));
+      const data = await res.json();
+      const rows = (data.items || []).map(t => {
+        const ts = fmtTs(t.timestamp);
+        const amt = Number(t.amount).toFixed(4);
+        const note = t.note || '';
+        return `<tr>
+          <td>${ts}</td>
+          <td>${t.type || ''}</td>
+          <td>${amt}</td>
+          <td>${note}</td>
+        </tr>`;
+      }).join('');
+      el('ledger_body').innerHTML = rows;
     }
 
     function addMarker(ev) {
@@ -492,6 +527,7 @@
     }
 
     el('refresh_trades').addEventListener('click', loadTrades);
+    el('refresh_ledger').addEventListener('click', loadLedger);
     el('ws_connect').addEventListener('click', () => {
       stopStreams();
       initWs();
@@ -502,6 +538,7 @@
     loadHistory();
     loadIndicatorHistory();
     loadTrades();
+    loadLedger();
     renderCountdown();
     initWs();
     initStatusWs();

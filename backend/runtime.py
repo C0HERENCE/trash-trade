@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import httpx
 import time
 from dataclasses import dataclass
 from typing import Optional
@@ -18,7 +19,7 @@ from .marketdata.buffer import (
 )
 from .marketdata.rest import BinanceRestClient, warmup_all
 from .marketdata.ws import BinanceWsClient, WsReconnectPolicy
-from .models import EquitySnapshot, Fee, PositionClose, PositionOpen, Trade
+from .models import EquitySnapshot, Fee, PositionClose, PositionOpen, Trade, LedgerEntry
 from .strategy import (
     EntrySignal,
     ExitAction,
@@ -71,6 +72,7 @@ class RuntimeEngine:
         self._ind_1h: Optional[Indicators1h] = None
 
         self._ws_task: Optional[asyncio.Task] = None
+        self._funding_task: Optional[asyncio.Task] = None
 
     async def start(self) -> None:
         await self._db.connect()
@@ -115,6 +117,7 @@ class RuntimeEngine:
         )
 
         self._ws_task = asyncio.create_task(self._ws.run())
+        self._funding_task = asyncio.create_task(self._funding_loop())
         logger.info("Runtime engine started")
 
     async def stop(self) -> None:
@@ -122,6 +125,8 @@ class RuntimeEngine:
             self._ws.stop()
         if self._ws_task is not None:
             self._ws_task.cancel()
+        if self._funding_task is not None:
+            self._funding_task.cancel()
         await self._db.close()
 
     async def _prime_indicators_from_history(self) -> None:
@@ -898,3 +903,63 @@ class RuntimeEngine:
             await self._alert.alert(level, title, message)
         except Exception:
             logger.exception("Failed to send alert")
+
+    async def _funding_loop(self) -> None:
+        while True:
+            try:
+                await self._maybe_apply_funding()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.exception("Funding loop error")
+            await asyncio.sleep(60)
+
+    async def _maybe_apply_funding(self) -> None:
+        if self._position is None:
+            return
+        try:
+            async with httpx.AsyncClient(base_url=self._settings.binance.rest_base, timeout=10.0) as client:
+                resp = await client.get(
+                    "/fapi/v1/fundingRate",
+                    params={"symbol": self._settings.binance.symbol, "limit": 1},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception:
+            logger.exception("Fetch fundingRate failed")
+            return
+
+        if not data:
+            return
+        fr = data[0]
+        fr_time = int(fr["fundingTime"])
+        rate = float(fr["fundingRate"])
+        now_ms = int(time.time() * 1000)
+        if abs(now_ms - fr_time) > 3 * 60 * 1000:
+            return
+        rows = await self._db.fetchall(
+            "SELECT 1 FROM ledger WHERE type='funding' AND ref=? LIMIT 1", (str(fr_time),)
+        )
+        if rows:
+            return
+
+        price = self._position.entry_price
+        notional = self._position.qty * price
+        pnl = notional * rate * (1 if self._position.side == "LONG" else -1)
+        self._account.balance += pnl
+        await self._update_status(price)
+        now_ms = int(time.time() * 1000)
+        await self._db.insert_ledger(
+            LedgerEntry(
+                timestamp=fr_time,
+                type="funding",
+                amount=pnl,
+                currency="USDT",
+                symbol=self._settings.binance.symbol,
+                ref=str(fr_time),
+                note=f"rate={rate}",
+                created_at=now_ms,
+            )
+        )
+        await self._snapshot_equity()
+        await self._alert.alert("INFO", "FUNDING", f"rate={rate:.6f} pnl={pnl:.4f}", dedup_key=f"funding_{fr_time}")

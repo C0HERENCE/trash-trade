@@ -7,6 +7,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence
 import aiosqlite
 
 from .models import Alert, EquitySnapshot, Fee, Kline, PositionClose, PositionOpen, Trade
+from .models import LedgerEntry
 
 
 logger = logging.getLogger(__name__)
@@ -331,3 +332,44 @@ class Database:
           updated_at=excluded.updated_at
         """
         await self.execute(sql, (key, value, updated_at))
+
+    async def insert_ledger(self, l: LedgerEntry) -> int:
+        sql = """
+        INSERT INTO ledger (timestamp, type, amount, currency, symbol, ref, note, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            l.timestamp,
+            l.type,
+            l.amount,
+            l.currency,
+            l.symbol,
+            l.ref,
+            l.note,
+            l.created_at,
+        )
+        await self.connect()
+        cursor = await self._conn.execute(sql, params)
+        await self._conn.commit()
+        return int(cursor.lastrowid)
+
+    async def get_ledger(
+        self,
+        limit: int = 100,
+        since: Optional[int] = None,
+        until: Optional[int] = None,
+    ) -> List[aiosqlite.Row]:
+        sql = "SELECT * FROM ledger"
+        params: List[Any] = []
+        where: List[str] = []
+        if since is not None:
+            where.append("timestamp >= ?")
+            params.append(since)
+        if until is not None:
+            where.append("timestamp <= ?")
+            params.append(until)
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        sql += " ORDER BY timestamp DESC LIMIT ?"
+        params.append(limit)
+        return await self.fetchall(sql, params)

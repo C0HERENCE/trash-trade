@@ -234,6 +234,18 @@ async def get_fees(
     return {"items": [dict(r) for r in rows]}
 
 
+@app.get("/api/ledger")
+async def get_ledger(
+    limit: int = Query(100, ge=1, le=1000),
+    since: Optional[int] = None,
+    until: Optional[int] = None,
+) -> Dict[str, Any]:
+    db = await _db()
+    rows = await db.get_ledger(limit=limit, since=since, until=until)
+    await db.close()
+    return {"items": [dict(r) for r in rows]}
+
+
 @app.get("/api/klines")
 async def get_klines(
     interval: str = Query("15m"),
