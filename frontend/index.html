@@ -281,6 +281,9 @@
 
     let markers = [];
     const eventKeys = new Set();
+    let stopLine = null;
+    let tp1Line = null;
+    let tp2Line = null;
 
     function updateStatus(data) {
       el('equity').textContent = fmt(data.equity);
@@ -299,6 +302,45 @@
       el('pos_stop').textContent = fmt(pos.stop_price);
       el('pos_tp1').textContent = fmt(pos.tp1_price);
       el('pos_tp2').textContent = fmt(pos.tp2_price);
+
+      // price lines
+      const clearLines = () => {
+        if (stopLine) { candleSeries.removePriceLine(stopLine); stopLine = null; }
+        if (tp1Line) { candleSeries.removePriceLine(tp1Line); tp1Line = null; }
+        if (tp2Line) { candleSeries.removePriceLine(tp2Line); tp2Line = null; }
+      };
+      if (pos.side && pos.qty && pos.entry_price) {
+        clearLines();
+        if (pos.stop_price) {
+          stopLine = candleSeries.createPriceLine({
+            price: pos.stop_price,
+            color: '#ff6b6b',
+            lineWidth: 1,
+            lineStyle: 2,
+            title: 'STOP',
+          });
+        }
+        if (pos.tp1_price) {
+          tp1Line = candleSeries.createPriceLine({
+            price: pos.tp1_price,
+            color: '#7ee787',
+            lineWidth: 1,
+            lineStyle: 2,
+            title: 'TP1',
+          });
+        }
+        if (pos.tp2_price) {
+          tp2Line = candleSeries.createPriceLine({
+            price: pos.tp2_price,
+            color: '#7ee787',
+            lineWidth: 1,
+            lineStyle: 0,
+            title: 'TP2',
+          });
+        }
+      } else {
+        clearLines();
+      }
 
       el('cooldown').textContent = data.cooldown_bars ?? '--';
       el('last_ts').textContent = fmtTs(data.timestamp);
