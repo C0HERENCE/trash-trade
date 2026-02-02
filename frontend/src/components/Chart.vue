@@ -1,6 +1,14 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { createChart } from 'lightweight-charts'
+
+const props = defineProps({
+  strategy: { type: String, default: null },
+  kline: { type: Object, default: null },
+  indicators: { type: Object, default: null },
+  events: { type: Array, default: () => [] },
+  position: { type: Object, default: () => ({}) },
+})
 
 const chartContainer = ref(null)
 let chart = null
@@ -9,6 +17,9 @@ let ema20Series = null
 let ema60Series = null
 let markers = []
 const eventKeys = new Set()
+let stopLine = null
+let tp1Line = null
+let tp2Line = null
 
 const basePath = (() => {
   const path = window.location.pathname
@@ -18,10 +29,37 @@ const basePath = (() => {
 })()
 
 const api = (p) => `${basePath}${p}`
+const withStrategy = (url) => {
+  if (!props.strategy) return url
+  return url + (url.includes('?') ? '&' : '?') + `strategy=${encodeURIComponent(props.strategy)}`
+}
+
+const clearLines = () => {
+  if (stopLine) { candleSeries.removePriceLine(stopLine); stopLine = null }
+  if (tp1Line) { candleSeries.removePriceLine(tp1Line); tp1Line = null }
+  if (tp2Line) { candleSeries.removePriceLine(tp2Line); tp2Line = null }
+}
+
+const updatePriceLines = () => {
+  if (!candleSeries) return
+  clearLines()
+  const pos = props.position || {}
+  if (pos.side && pos.qty && pos.entry_price) {
+    if (pos.stop_price) {
+      stopLine = candleSeries.createPriceLine({ price: pos.stop_price, color: '#ff6b6b', lineWidth: 1, lineStyle: 2, title: 'STOP' })
+    }
+    if (pos.tp1_price) {
+      tp1Line = candleSeries.createPriceLine({ price: pos.tp1_price, color: '#7ee787', lineWidth: 1, lineStyle: 2, title: 'TP1' })
+    }
+    if (pos.tp2_price) {
+      tp2Line = candleSeries.createPriceLine({ price: pos.tp2_price, color: '#7ee787', lineWidth: 1, lineStyle: 0, title: 'TP2' })
+    }
+  }
+}
 
 const loadHistory = async () => {
   try {
-    const res = await fetch(api('/api/klines?interval=15m&limit=500'))
+    const res = await fetch(withStrategy(api('/api/klines?interval=15m&limit=500')))
     const data = await res.json()
     const items = data.items || []
     const candles = items.map(k => ({
@@ -39,7 +77,7 @@ const loadHistory = async () => {
 
 const loadIndicatorHistory = async () => {
   try {
-    const res = await fetch(api('/api/indicator_history?interval=15m&limit=500'))
+    const res = await fetch(withStrategy(api('/api/indicator_history?interval=15m&limit=500')))
     const data = await res.json()
     const items = data.items || []
     const ema20 = []
@@ -81,6 +119,18 @@ const resizeChart = () => {
   }
 }
 
+const resetChartData = () => {
+  markers = []
+  eventKeys.clear()
+  if (candleSeries) {
+    candleSeries.setMarkers([])
+    candleSeries.setData([])
+  }
+  if (ema20Series) ema20Series.setData([])
+  if (ema60Series) ema60Series.setData([])
+  clearLines()
+}
+
 onMounted(() => {
   if (chartContainer.value) {
     try {
@@ -90,17 +140,11 @@ onMounted(() => {
         rightPriceScale: { borderColor: '#242a3a' },
         timeScale: { borderColor: '#242a3a' },
       })
-      
-      console.log('Chart created successfully:', chart)
-      console.log('Available methods:', Object.keys(chart))
-      
       candleSeries = chart.addCandlestickSeries()
       ema20Series = chart.addLineSeries({ color: '#5cc8ff', lineWidth: 1 })
       ema60Series = chart.addLineSeries({ color: '#ffb86c', lineWidth: 1 })
-      
       loadHistory()
       loadIndicatorHistory()
-      
       window.addEventListener('resize', resizeChart)
       resizeChart()
     } catch (error) {
@@ -116,6 +160,40 @@ onUnmounted(() => {
     chart = null
   }
 })
+
+watch(() => props.strategy, async () => {
+  resetChartData()
+  await loadHistory()
+  await loadIndicatorHistory()
+  updatePriceLines()
+})
+
+watch(() => props.kline, (k) => {
+  if (!k || !candleSeries) return
+  candleSeries.update({
+    time: Math.floor(k.t / 1000),
+    open: k.o,
+    high: k.h,
+    low: k.l,
+    close: k.c,
+  })
+})
+
+watch(() => props.indicators, (i) => {
+  if (!i || !props.kline || !ema20Series || !ema60Series) return
+  const t = Math.floor(props.kline.t / 1000)
+  ema20Series.update({ time: t, value: i.ema20 })
+  ema60Series.update({ time: t, value: i.ema60 })
+})
+
+watch(() => props.events, (evs) => {
+  if (!evs || !evs.length) return
+  evs.forEach(addMarker)
+})
+
+watch(() => props.position, () => {
+  updatePriceLines()
+}, { deep: true })
 </script>
 
 <template>

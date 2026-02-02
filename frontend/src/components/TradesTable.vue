@@ -1,33 +1,31 @@
 <script setup>
-import { ref } from 'vue'
-
 const props = defineProps({
   trades: {
     type: Array,
     default: () => []
+  },
+  page: {
+    type: Number,
+    default: 0
+  },
+  hasMore: {
+    type: Boolean,
+    default: false
   }
 })
-
-const page = ref(0)
-const pageSize = 20
-const hasMore = ref(true)
 
 const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4)
 const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--'
 
 const handlePrevPage = () => {
-  if (page.value > 0) {
-    page.value--
-    // 触发父组件加载数据
-    emit('page-change', page.value)
+  if (props.page > 0) {
+    emit('page-change', props.page - 1)
   }
 }
 
 const handleNextPage = () => {
-  if (hasMore.value) {
-    page.value++
-    // 触发父组件加载数据
-    emit('page-change', page.value)
+  if (props.hasMore) {
+    emit('page-change', props.page + 1)
   }
 }
 

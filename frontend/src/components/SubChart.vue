@@ -1,6 +1,12 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { createChart } from 'lightweight-charts'
+
+const props = defineProps({
+  strategy: { type: String, default: null },
+  indicators: { type: Object, default: null },
+  kline: { type: Object, default: null },
+})
 
 const chartContainer = ref(null)
 let chart = null
@@ -15,10 +21,14 @@ const basePath = (() => {
 })()
 
 const api = (p) => `${basePath}${p}`
+const withStrategy = (url) => {
+  if (!props.strategy) return url
+  return url + (url.includes('?') ? '&' : '?') + `strategy=${encodeURIComponent(props.strategy)}`
+}
 
 const loadIndicatorHistory = async () => {
   try {
-    const res = await fetch(api('/api/indicator_history?interval=15m&limit=500'))
+    const res = await fetch(withStrategy(api('/api/indicator_history?interval=15m&limit=500')))
     const data = await res.json()
     const items = data.items || []
     const macd = []
@@ -48,6 +58,11 @@ const resizeChart = () => {
   }
 }
 
+const resetData = () => {
+  if (macdSeries) macdSeries.setData([])
+  if (rsiSeries) rsiSeries.setData([])
+}
+
 onMounted(() => {
   if (chartContainer.value) {
     try {
@@ -57,15 +72,9 @@ onMounted(() => {
         rightPriceScale: { borderColor: '#242a3a' },
         timeScale: { borderColor: '#242a3a' },
       })
-      
-      console.log('Chart created successfully:', chart)
-      console.log('Available methods:', Object.keys(chart))
-      
       macdSeries = chart.addHistogramSeries({ color: '#7ee787' })
       rsiSeries = chart.addLineSeries({ color: '#ff6b6b', lineWidth: 1 })
-      
       loadIndicatorHistory()
-      
       window.addEventListener('resize', resizeChart)
       resizeChart()
     } catch (error) {
@@ -80,6 +89,18 @@ onUnmounted(() => {
     chart.destroy()
     chart = null
   }
+})
+
+watch(() => props.strategy, async () => {
+  resetData()
+  await loadIndicatorHistory()
+})
+
+watch(() => props.indicators, (i) => {
+  if (!i || !props.kline) return
+  const t = Math.floor(props.kline.t / 1000)
+  macdSeries?.update({ time: t, value: i.macd_hist, color: i.macd_hist >= 0 ? '#7ee787' : '#ff6b6b' })
+  rsiSeries?.update({ time: t, value: i.rsi14 })
 })
 </script>
 

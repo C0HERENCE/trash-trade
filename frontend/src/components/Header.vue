@@ -1,4 +1,6 @@
 <script setup>
+import { ref } from 'vue'
+
 const props = defineProps({
   strategies: {
     type: Array,
@@ -15,6 +17,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['strategy-change', 'connect-ws'])
+const shareMsg = ref('')
 
 const handleStrategyChange = (event) => {
   emit('strategy-change', event.target.value)
@@ -22,6 +25,48 @@ const handleStrategyChange = (event) => {
 
 const handleConnectWs = () => {
   emit('connect-ws')
+}
+
+const setShareStatus = (msg) => {
+  shareMsg.value = msg || ''
+  if (msg) setTimeout(() => (shareMsg.value = ''), 2000)
+}
+
+const copyToClipboard = async (text) => {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text)
+    return true
+  }
+  const input = document.createElement('input')
+  input.value = text
+  document.body.appendChild(input)
+  input.select()
+  const ok = document.execCommand('copy')
+  document.body.removeChild(input)
+  return ok
+}
+
+const handleShare = async () => {
+  const sid = props.currentStrategy
+  const url = new URL(window.location.href)
+  if (sid) url.searchParams.set('strategy', sid)
+  const shareUrl = url.toString()
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: document.title, url: shareUrl })
+      setShareStatus('已分享')
+      return
+    }
+  } catch (e) {
+    // ignore and fallback
+  }
+  try {
+    const ok = await copyToClipboard(shareUrl)
+    if (ok) setShareStatus('已复制')
+    else window.prompt('复制此链接', shareUrl)
+  } catch {
+    window.prompt('复制此链接', shareUrl)
+  }
 }
 </script>
 
@@ -40,8 +85,8 @@ const handleConnectWs = () => {
           {{ strategy.id }} ({{ strategy.type }})
         </option>
       </select>
-      <button class="btn" id="share_link" style="margin-left:6px;">分享</button>
-      <span id="share_status" style="margin-left:6px;color:var(--muted);font-size:12px;"></span>
+      <button class="btn" id="share_link" style="margin-left:6px;" @click="handleShare">分享</button>
+      <span id="share_status" style="margin-left:6px;color:var(--muted);font-size:12px;">{{ shareMsg }}</span>
       <span class="value">{{ countdown }}</span>
       <button class="btn" id="ws_connect" style="margin-left:10px;" @click="handleConnectWs">连接</button>
     </div>

@@ -1,5 +1,7 @@
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import pako from 'pako'
+import { decode as msgpackDecode } from '@msgpack/msgpack'
 import Header from './components/Header.vue'
 import AssetCard from './components/AssetCard.vue'
 import PositionCard from './components/PositionCard.vue'
@@ -32,6 +34,14 @@ const countdownTimer = ref(null)
 const remainingSec = ref(600)
 const strategies = ref([])
 const defaultStrategy = ref('')
+const streamKline = ref(null)
+const streamIndicators = ref(null)
+const streamEvents = ref([])
+const tradesPage = ref(0)
+const ledgerPage = ref(0)
+const tradesHasMore = ref(false)
+const ledgerHasMore = ref(false)
+const pageSize = 20
 
 const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4)
 const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--'
@@ -94,23 +104,29 @@ const loadEquitySpark = async () => {
   }
 }
 
-const loadTrades = async (page = 0, pageSize = 20) => {
+const loadTrades = async (page = tradesPage.value) => {
   try {
+    tradesPage.value = page
     const offset = page * pageSize
     const res = await fetch(withStrategy(api(`/api/trades?limit=${pageSize}&offset=${offset}`)))
     const data = await res.json()
-    trades.value = data.items || []
+    const items = data.items || []
+    trades.value = items
+    tradesHasMore.value = items.length === pageSize
   } catch (error) {
     console.error('Failed to load trades:', error)
   }
 }
 
-const loadLedger = async (page = 0, pageSize = 20) => {
+const loadLedger = async (page = ledgerPage.value) => {
   try {
+    ledgerPage.value = page
     const offset = page * pageSize
     const res = await fetch(withStrategy(api(`/api/ledger?limit=${pageSize}&offset=${offset}`)))
     const data = await res.json()
-    ledger.value = data.items || []
+    const items = data.items || []
+    ledger.value = items
+    ledgerHasMore.value = items.length === pageSize
   } catch (error) {
     console.error('Failed to load ledger:', error)
   }
@@ -139,8 +155,8 @@ const decodeMessage = async (data) => {
     return null
   }
   try {
-    const inflated = window.pako.inflate(buf)
-    return window.msgpack.decode(inflated)
+    const inflated = pako.inflate(buf)
+    return msgpackDecode(inflated)
   } catch {
     return null
   }
@@ -178,6 +194,38 @@ const startCountdown = () => {
   }, 1000)
 }
 
+const applyStreamPayload = (payload) => {
+  if (!payload) return
+  if (payload.sid && currentStrategy.value && payload.sid !== currentStrategy.value) return
+
+  if (payload.k) {
+    streamKline.value = payload.k
+  }
+  if (payload.i15) {
+    streamIndicators.value = payload.i15
+  }
+  if (payload.sig && payload.sig.t === 'cond') {
+    conditions.value = payload.sig.c || { long: [], short: [] }
+  }
+  if (payload.ev) {
+    const evs = (payload.ev || []).filter(e => !e.sid || !currentStrategy.value || e.sid === currentStrategy.value)
+    streamEvents.value = evs.filter(e => ['entry', 'exit', 'tp1', 'tp2'].includes(e.type)).slice(-100)
+    evs.forEach((e) => {
+      if (e.type === 'trade') {
+        const row = {
+          timestamp: e.timestamp,
+          trade_type: e.trade_type,
+          side: e.side,
+          price: e.price,
+          qty: e.qty,
+          reason: e.reason,
+        }
+        trades.value = [row, ...trades.value].slice(0, pageSize)
+      }
+    })
+  }
+}
+
 const initWs = () => {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const url = withStrategy(`${proto}://${location.host}${basePath}/ws/stream`)
@@ -185,11 +233,7 @@ const initWs = () => {
   wsStream.value.binaryType = 'arraybuffer'
   wsStream.value.onmessage = async (ev) => {
     const payload = await decodeMessage(ev.data)
-    if (payload) {
-      if (payload.sig && payload.sig.t === 'cond') {
-        conditions.value = payload.sig.c || { long: [], short: [] }
-      }
-    }
+    applyStreamPayload(payload)
   }
   wsStream.value.onclose = () => {}
 }
@@ -221,11 +265,16 @@ const handleStrategyChange = async (strategy) => {
   const url = new URL(window.location.href)
   url.searchParams.set('strategy', strategy)
   window.history.replaceState({}, '', url.toString())
+  streamKline.value = null
+  streamIndicators.value = null
+  streamEvents.value = []
+  tradesPage.value = 0
+  ledgerPage.value = 0
   
   await loadStatus()
   await loadEquitySpark()
-  await loadTrades()
-  await loadLedger()
+  await loadTrades(0)
+  await loadLedger(0)
   await loadStats()
   
   stopStreams()
@@ -235,15 +284,22 @@ const handleStrategyChange = async (strategy) => {
 }
 
 onMounted(async () => {
+  if ('scrollRestoration' in window.history) {
+    window.history.scrollRestoration = 'manual'
+  }
+  const forceTop = () => {
+    document.documentElement.scrollTop = 0
+    document.body.scrollTop = 0
+  }
   // 强制滚动到页面顶部，解决自动滚动到图表的问题
-  window.scrollTo({ top: 0, behavior: 'auto' })
+  forceTop()
   
   await loadStrategies()
   if (currentStrategy.value) {
     await loadStatus()
     await loadEquitySpark()
-    await loadTrades()
-    await loadLedger()
+    await loadTrades(0)
+    await loadLedger(0)
     await loadStats()
     initWs()
     initStatusWs()
@@ -251,14 +307,32 @@ onMounted(async () => {
   }
   
   // 再次滚动到顶部，确保所有组件加载完成后页面仍在顶部
-  setTimeout(() => {
-    window.scrollTo({ top: 0, behavior: 'auto' })
-  }, 100)
+  await nextTick()
+  forceTop()
+  setTimeout(forceTop, 120)
 })
 
 onUnmounted(() => {
   stopStreams()
 })
+
+const onTradesPageChange = async (page) => {
+  const p = Math.max(0, page)
+  await loadTrades(p)
+}
+
+const onTradesRefresh = async () => {
+  await loadTrades(tradesPage.value)
+}
+
+const onLedgerPageChange = async (page) => {
+  const p = Math.max(0, page)
+  await loadLedger(p)
+}
+
+const onLedgerRefresh = async () => {
+  await loadLedger(ledgerPage.value)
+}
 </script>
 
 <template>
@@ -276,11 +350,33 @@ onUnmounted(() => {
         <PositionCard :data="status" />
         <RunCard :data="status" :stats="stats" />
       </div>
-      <Chart />
-      <SubChart />
+      <Chart 
+        :strategy="currentStrategy" 
+        :kline="streamKline" 
+        :indicators="streamIndicators" 
+        :events="streamEvents"
+        :position="status.position || {}"
+      />
+      <SubChart 
+        :strategy="currentStrategy" 
+        :kline="streamKline" 
+        :indicators="streamIndicators" 
+      />
       <ConditionsCard :conditions="conditions" />
-      <TradesTable :trades="trades" />
-      <LedgerTable :ledger="ledger" />
+      <TradesTable 
+        :trades="trades" 
+        :page="tradesPage" 
+        :has-more="tradesHasMore"
+        @page-change="onTradesPageChange"
+        @refresh="onTradesRefresh"
+      />
+      <LedgerTable 
+        :ledger="ledger" 
+        :page="ledgerPage" 
+        :has-more="ledgerHasMore"
+        @page-change="onLedgerPageChange"
+        @refresh="onLedgerRefresh"
+      />
     </main>
   </div>
 </template>
@@ -348,11 +444,19 @@ h1 {
 }
 
 main {
-  padding: 20px 24px 40px;
+  padding: 20px 16px 40px;
   display: grid;
   gap: 16px;
   grid-template-columns: 1fr;
-  max-width: 100%;
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  scroll-margin-top: 0;
+}
+
+main > * {
+  min-width: 0;
 }
 
 .grid {
@@ -413,6 +517,7 @@ main {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 .btn {
