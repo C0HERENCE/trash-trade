@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <title>Trash-Trade Dashboard</title>
+  <title>Trash-Trade 控制台</title>
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
@@ -177,78 +177,78 @@
     <h1>Trash-Trade / BTCUSDT</h1>
     <div class="row">
       <span class="value" id="countdown">--:--</span>
-      <button class="btn" id="ws_connect" style="margin-left:10px;">Connect</button>
+      <button class="btn" id="ws_connect" style="margin-left:10px;">连接</button>
     </div>
   </header>
   <main>
     <div class="grid">
       <div class="card">
-        <h2>Equity</h2>
+        <h2>资产</h2>
         <div class="stat" id="equity">--</div>
-        <div class="row"><span>Balance</span><span class="value" id="balance">--</span></div>
-        <div class="row"><span>UPL</span><span class="value" id="upl">--</span></div>
-        <div class="row"><span>Margin Used</span><span class="value" id="margin">--</span></div>
-        <div class="row"><span>Free Margin</span><span class="value" id="free_margin">--</span></div>
+        <div class="row"><span>余额</span><span class="value" id="balance">--</span></div>
+        <div class="row"><span>浮动盈亏</span><span class="value" id="upl">--</span></div>
+        <div class="row"><span>已用保证金</span><span class="value" id="margin">--</span></div>
+        <div class="row"><span>可用保证金</span><span class="value" id="free_margin">--</span></div>
       </div>
       <div class="card">
-        <h2>Position</h2>
+        <h2>仓位</h2>
         <div class="stat" id="pos_side">--</div>
-        <div class="row"><span>Qty</span><span class="value" id="pos_qty">--</span></div>
-        <div class="row"><span>Entry</span><span class="value" id="pos_entry">--</span></div>
-        <div class="row"><span>Stop</span><span class="value" id="pos_stop">--</span></div>
+        <div class="row"><span>数量</span><span class="value" id="pos_qty">--</span></div>
+        <div class="row"><span>开仓价</span><span class="value" id="pos_entry">--</span></div>
+        <div class="row"><span>止损</span><span class="value" id="pos_stop">--</span></div>
         <div class="row"><span>TP1</span><span class="value" id="pos_tp1">--</span></div>
         <div class="row"><span>TP2</span><span class="value" id="pos_tp2">--</span></div>
         <div class="row"><span>LIQ</span><span class="value" id="pos_liq">--</span></div>
       </div>
       <div class="card">
-      <h2>Runtime</h2>
-      <div class="row"><span>Cooldown Bars</span><span class="value" id="cooldown">--</span></div>
-      <div class="row"><span>Last Update</span><span class="value" id="last_ts">--</span></div>
-      <div class="row"><span>ROI</span><span class="value" id="stat_roi">--</span></div>
+        <h2>运行</h2>
+        <div class="row"><span>冷却剩余(15m根)</span><span class="value" id="cooldown">--</span></div>
+        <div class="row"><span>最后更新</span><span class="value" id="last_ts">--</span></div>
+      <div class="row"><span>总收益率</span><span class="value" id="stat_roi">--</span></div>
       <div class="row"><span>TP1 胜率</span><span class="value" id="stat_tp1">--</span></div>
       <div class="row"><span>TP2 胜率</span><span class="value" id="stat_tp2">--</span></div>
       <div class="row"><span>止损率</span><span class="value" id="stat_stop">--</span></div>
+      </div>
     </div>
-  </div>
 
     <div class="card">
-      <h2>15m Kline + EMA</h2>
+      <h2>15m K 线 + EMA</h2>
       <div id="chart"></div>
     </div>
 
     <div class="card">
-      <h2>MACD Hist + RSI</h2>
+      <h2>MACD 柱 + RSI</h2>
       <div id="subchart"></div>
     </div>
 
     <div class="card">
-      <h2>Entry Conditions</h2>
-      <div class="row"><span>Long</span></div>
+      <h2>入场条件</h2>
+      <div class="row"><span>做多</span></div>
       <div id="cond_long" class="checklist"></div>
-      <div class="row" style="margin-top:10px;"><span>Short</span></div>
+      <div class="row" style="margin-top:10px;"><span>做空</span></div>
       <div id="cond_short" class="checklist"></div>
     </div>
 
     <div class="card">
       <div class="toolbar">
-        <h2>Recent Trades</h2>
+        <h2>最近成交</h2>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button class="btn" id="prev_trades">Prev</button>
+          <button class="btn" id="prev_trades">上一页</button>
           <span id="page_trades" style="font-size:12px;color:var(--muted);">1</span>
-          <button class="btn" id="next_trades">Next</button>
-          <button class="btn" id="refresh_trades">Refresh</button>
+          <button class="btn" id="next_trades">下一页</button>
+          <button class="btn" id="refresh_trades">刷新</button>
         </div>
       </div>
       <div class="table-scroll">
         <table>
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Type</th>
-              <th>Side</th>
-              <th>Price</th>
-              <th>Qty</th>
-              <th>Reason</th>
+              <th>时间</th>
+              <th>类型</th>
+              <th>方向</th>
+              <th>价格</th>
+              <th>数量</th>
+              <th>原因</th>
             </tr>
           </thead>
           <tbody id="trades_body"></tbody>
@@ -258,22 +258,22 @@
 
     <div class="card">
       <div class="toolbar">
-        <h2>Ledger</h2>
+        <h2>流水</h2>
         <div style="display:flex; gap:8px; align-items:center;">
-          <button class="btn" id="prev_ledger">Prev</button>
+          <button class="btn" id="prev_ledger">上一页</button>
           <span id="page_ledger" style="font-size:12px;color:var(--muted);">1</span>
-          <button class="btn" id="next_ledger">Next</button>
-          <button class="btn" id="refresh_ledger">Refresh</button>
+          <button class="btn" id="next_ledger">下一页</button>
+          <button class="btn" id="refresh_ledger">刷新</button>
         </div>
       </div>
       <div class="table-scroll">
         <table>
           <thead>
             <tr>
-              <th>Time</th>
-              <th>Type</th>
-              <th>Amount</th>
-              <th>Note</th>
+              <th>时间</th>
+              <th>类型</th>
+              <th>金额</th>
+              <th>备注</th>
             </tr>
           </thead>
           <tbody id="ledger_body"></tbody>
