@@ -129,6 +129,7 @@ class StreamStore:
 
 settings = load_settings()
 app = FastAPI(title="trash-trade", root_path=settings.api.base_path or "")
+DEFAULT_STRATEGY = settings.strategies[0].id if settings.strategies else "test"
 
 # Hooks injected from main/runtime
 runtime_state_provider = None  # callable returning dict
@@ -187,9 +188,11 @@ def _stream_to_dict(s: StreamSnapshot, events: List[Dict[str, Any]]) -> Dict[str
 
 
 @app.get("/api/status")
-async def get_status() -> Dict[str, Any]:
+async def get_status(strategy: Optional[str] = Query(None)) -> Dict[str, Any]:
     s = await status_store.get()
-    return _status_to_dict(s)
+    payload = _status_to_dict(s)
+    payload["strategy"] = strategy or DEFAULT_STRATEGY
+    return payload
 
 
 async def _db() -> Database:
@@ -204,9 +207,16 @@ async def get_trades(
     offset: int = Query(0, ge=0),
     since: Optional[int] = None,
     until: Optional[int] = None,
+    strategy: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
     db = await _db()
-    rows = await db.get_trades(limit=limit, offset=offset, since=since, until=until)
+    rows = await db.get_trades(
+        limit=limit,
+        offset=offset,
+        since=since,
+        until=until,
+        strategy=strategy or DEFAULT_STRATEGY,
+    )
     await db.close()
     return {"items": [dict(r) for r in rows]}
 
@@ -216,9 +226,15 @@ async def get_positions(
     limit: int = Query(100, ge=1, le=1000),
     since: Optional[int] = None,
     until: Optional[int] = None,
+    strategy: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
     db = await _db()
-    rows = await db.get_positions(limit=limit, since=since, until=until)
+    rows = await db.get_positions(
+        limit=limit,
+        since=since,
+        until=until,
+        strategy=strategy or DEFAULT_STRATEGY,
+    )
     await db.close()
     return {"items": [dict(r) for r in rows]}
 
@@ -229,21 +245,29 @@ async def get_ledger(
     offset: int = Query(0, ge=0),
     since: Optional[int] = None,
     until: Optional[int] = None,
+    strategy: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
     db = await _db()
-    rows = await db.get_ledger(limit=limit, offset=offset, since=since, until=until)
+    rows = await db.get_ledger(
+        limit=limit,
+        offset=offset,
+        since=since,
+        until=until,
+        strategy=strategy or DEFAULT_STRATEGY,
+    )
     await db.close()
     return {"items": [dict(r) for r in rows]}
 
 
 @app.get("/api/stats")
-async def get_stats() -> Dict[str, Any]:
+async def get_stats(strategy: Optional[str] = Query(None)) -> Dict[str, Any]:
+    sid = strategy or DEFAULT_STRATEGY
     db = await _db()
-    closed = await db.get_closed_position_count()
-    tp1 = await db.get_distinct_trade_reason_count("tp1")
-    tp2 = await db.get_distinct_trade_reason_count("tp2")
-    stops = await db.get_stop_close_count()
-    latest_equity = await db.get_latest_equity()
+    closed = await db.get_closed_position_count(strategy=sid)
+    tp1 = await db.get_distinct_trade_reason_count("tp1", strategy=sid)
+    tp2 = await db.get_distinct_trade_reason_count("tp2", strategy=sid)
+    stops = await db.get_stop_close_count(strategy=sid)
+    latest_equity = await db.get_latest_equity(strategy=sid)
     await db.close()
 
     initial = settings.sim.initial_capital
@@ -254,6 +278,7 @@ async def get_stats() -> Dict[str, Any]:
         return (x / closed) if closed > 0 and x > 0 else 0.0
 
     return {
+        "strategy": sid,
         "closed_positions": closed,
         "roi": roi,
         "tp1_rate": rate(tp1),
@@ -381,9 +406,12 @@ async def ws_status(websocket: WebSocket) -> None:
     try:
         interval = settings.api.ws_push_interval
         sleep_s: Optional[float] = None if interval == "raw" else float(interval)
+        sid = websocket.query_params.get("strategy") or DEFAULT_STRATEGY
         while True:
             s = await status_store.get()
-            payload = msgpack.packb(_status_to_dict(s), use_bin_type=True)
+            payload = _status_to_dict(s)
+            payload["strategy"] = sid
+            payload = msgpack.packb(payload, use_bin_type=True)
             await websocket.send_bytes(zlib.compress(payload))
             if sleep_s is None:
                 # raw mode: wait for next loop tick, avoid tight spin
@@ -410,10 +438,16 @@ async def ws_stream(websocket: WebSocket) -> None:
     try:
         interval = settings.api.ws_push_interval
         sleep_s: Optional[float] = None if interval == "raw" else float(interval)
+        sid = websocket.query_params.get("strategy") or DEFAULT_STRATEGY
         while True:
             snap = await stream_store.get_snapshot()
             events = await stream_store.get_events(limit=50)
-            payload = msgpack.packb(_stream_to_dict(snap, events), use_bin_type=True)
+            filtered = [e for e in events if e.get("sid") in (None, sid)]
+            stream_payload = _stream_to_dict(snap, filtered)
+            if stream_payload.get("sig") and stream_payload["sig"].get("sid") not in (None, sid):
+                stream_payload["sig"] = None
+            stream_payload["sid"] = sid
+            payload = msgpack.packb(stream_payload, use_bin_type=True)
             await websocket.send_bytes(zlib.compress(payload))
             if sleep_s is None:
                 await asyncio.sleep(0.2)

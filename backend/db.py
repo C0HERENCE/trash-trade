@@ -262,10 +262,14 @@ class Database:
         since: Optional[int] = None,
         until: Optional[int] = None,
         offset: int = 0,
+        strategy: Optional[str] = None,
     ) -> List[aiosqlite.Row]:
         sql = "SELECT * FROM trades"
         params: List[Any] = []
         where: List[str] = []
+        if strategy is not None:
+            where.append("strategy = ?")
+            params.append(strategy)
         if since is not None:
             where.append("timestamp >= ?")
             params.append(since)
@@ -284,10 +288,14 @@ class Database:
         limit: int = 100,
         since: Optional[int] = None,
         until: Optional[int] = None,
+        strategy: Optional[str] = None,
     ) -> List[aiosqlite.Row]:
         sql = "SELECT * FROM positions"
         params: List[Any] = []
         where: List[str] = []
+        if strategy is not None:
+            where.append("strategy = ?")
+            params.append(strategy)
         if status is not None:
             where.append("status = ?")
             params.append(status)
@@ -346,10 +354,14 @@ class Database:
         since: Optional[int] = None,
         until: Optional[int] = None,
         offset: int = 0,
+        strategy: Optional[str] = None,
     ) -> List[aiosqlite.Row]:
         sql = "SELECT * FROM ledger"
         params: List[Any] = []
         where: List[str] = []
+        if strategy is not None:
+            where.append("strategy = ?")
+            params.append(strategy)
         if since is not None:
             where.append("timestamp >= ?")
             params.append(since)
@@ -362,27 +374,41 @@ class Database:
         params.extend([limit, offset])
         return await self.fetchall(sql, params)
 
-    async def get_closed_position_count(self) -> int:
-        row = await self.fetchone("SELECT COUNT(*) AS c FROM positions WHERE status='CLOSED'")
+    async def get_closed_position_count(self, strategy: Optional[str] = None) -> int:
+        sql = "SELECT COUNT(*) AS c FROM positions WHERE status='CLOSED'"
+        params: List[Any] = []
+        if strategy is not None:
+            sql += " AND strategy=?"
+            params.append(strategy)
+        row = await self.fetchone(sql, params)
         return int(row["c"]) if row else 0
 
-    async def get_distinct_trade_reason_count(self, reason: str) -> int:
-        row = await self.fetchone(
-            "SELECT COUNT(DISTINCT position_id) AS c FROM trades WHERE reason=?",
-            (reason,),
-        )
+    async def get_distinct_trade_reason_count(self, reason: str, strategy: Optional[str] = None) -> int:
+        sql = "SELECT COUNT(DISTINCT position_id) AS c FROM trades WHERE reason=?"
+        params: List[Any] = [reason]
+        if strategy is not None:
+            sql += " AND strategy=?"
+            params.append(strategy)
+        row = await self.fetchone(sql, params)
         return int(row["c"]) if row else 0
 
-    async def get_stop_close_count(self) -> int:
-        row = await self.fetchone(
-            "SELECT COUNT(*) AS c FROM positions WHERE status='CLOSED' AND close_reason='stop'"
-        )
+    async def get_stop_close_count(self, strategy: Optional[str] = None) -> int:
+        sql = "SELECT COUNT(*) AS c FROM positions WHERE status='CLOSED' AND close_reason='stop'"
+        params: List[Any] = []
+        if strategy is not None:
+            sql += " AND strategy=?"
+            params.append(strategy)
+        row = await self.fetchone(sql, params)
         return int(row["c"]) if row else 0
 
-    async def get_latest_equity(self) -> Optional[float]:
-        row = await self.fetchone(
-            "SELECT equity FROM equity_snapshots ORDER BY timestamp DESC LIMIT 1"
-        )
+    async def get_latest_equity(self, strategy: Optional[str] = None) -> Optional[float]:
+        sql = "SELECT equity FROM equity_snapshots"
+        params: List[Any] = []
+        if strategy is not None:
+            sql += " WHERE strategy=?"
+            params.append(strategy)
+        sql += " ORDER BY timestamp DESC LIMIT 1"
+        row = await self.fetchone(sql, params)
         if row:
             return float(row["equity"])
         return None
