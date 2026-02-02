@@ -502,6 +502,16 @@
       el('stat_stop').textContent = (s.stop_rate * 100).toFixed(2) + '%';
     }
 
+    async function loadStrategies() {
+      const res = await fetch(api('/api/strategies'));
+      const data = await res.json();
+      const select = el('strategy_select');
+      const items = data.items || [];
+      select.innerHTML = items.map(x => `<option value="${x.id}">${x.id} (${x.type})</option>`).join('');
+      currentStrategy = data.default || (items[0] ? items[0].id : null);
+      if (currentStrategy) select.value = currentStrategy;
+    }
+
     function addMarker(ev) {
       const key = `${ev.type}-${ev.side}-${ev.ts}-${ev.price ?? ''}`;
       if (eventKeys.has(key)) return;
@@ -702,12 +712,3 @@
   </script>
 </body>
 </html>
-    async function loadStrategies() {
-      const res = await fetch(api('/api/strategies'));
-      const data = await res.json();
-      const select = el('strategy_select');
-      const items = data.items || [];
-      select.innerHTML = items.map(x => `<option value="${x.id}">${x.id} (${x.type})</option>`).join('');
-      currentStrategy = data.default || (items[0] ? items[0].id : null);
-      if (currentStrategy) select.value = currentStrategy;
-    }
