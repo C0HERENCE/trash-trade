@@ -186,6 +186,7 @@
     <div class="row">
       <label for="strategy_select" style="color:var(--muted);margin-right:6px;">策略</label>
       <select id="strategy_select" class="select"></select>
+      <button class="btn" id="share_link" style="margin-left:6px;">分享</button>
       <span class="value" id="countdown">--:--</span>
       <button class="btn" id="ws_connect" style="margin-left:10px;">连接</button>
     </div>
@@ -517,10 +518,14 @@
       const data = await res.json();
       const select = el('strategy_select');
       const items = data.items || [];
-      select.innerHTML = items.map(x => `<option value="${x.id}">${x.id} (${x.type})</option>`).join('');
       const ids = items.map(x => x.id);
+      const urlParams = new URLSearchParams(window.location.search);
+      const qsStrategy = urlParams.get('strategy');
       const stored = localStorage.getItem(STRATEGY_STORAGE_KEY);
-      if (stored && ids.includes(stored)) {
+      select.innerHTML = items.map(x => `<option value="${x.id}">${x.id} (${x.type})</option>`).join('');
+      if (qsStrategy && ids.includes(qsStrategy)) {
+        currentStrategy = qsStrategy;
+      } else if (stored && ids.includes(stored)) {
         currentStrategy = stored;
       } else if (data.default && ids.includes(data.default)) {
         currentStrategy = data.default;
@@ -701,6 +706,9 @@
     el('strategy_select').addEventListener('change', async (ev) => {
       currentStrategy = ev.target.value;
       localStorage.setItem(STRATEGY_STORAGE_KEY, currentStrategy);
+      const url = new URL(window.location.href);
+      url.searchParams.set('strategy', currentStrategy);
+      window.history.replaceState({}, '', url.toString());
       tradesPage = 0;
       ledgerPage = 0;
       await loadStatus();
@@ -733,3 +741,29 @@
   </script>
 </body>
 </html>
+    el('share_link').addEventListener('click', async () => {
+      if (!currentStrategy) return;
+      const url = new URL(window.location.href);
+      url.searchParams.set('strategy', currentStrategy);
+      const shareUrl = url.toString();
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: document.title, url: shareUrl });
+        } else if (navigator.clipboard) {
+          await navigator.clipboard.writeText(shareUrl);
+          alert('链接已复制');
+        } else {
+          prompt('复制此链接', shareUrl);
+        }
+      } catch {
+        // fallback to clipboard/prompt if share cancelled
+        try {
+          if (navigator.clipboard) {
+            await navigator.clipboard.writeText(shareUrl);
+            alert('链接已复制');
+          } else {
+            prompt('复制此链接', shareUrl);
+          }
+        } catch {}
+      }
+    });
