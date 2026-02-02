@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 
 @dataclass(slots=True)
@@ -84,6 +84,22 @@ class ExitAction:
     reason: str
 
 
+@runtime_checkable
+class IStrategy(Protocol):
+    """Strategy interface to allow multiple strategies to plug into runtime."""
+
+    id: str
+
+    def on_bar_close(self, ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
+        ...
+
+    def on_tick(self, ctx: StrategyContext, price: float) -> Optional[ExitAction]:
+        ...
+
+    def on_state_restore(self, ctx: StrategyContext) -> None:
+        ...
+
+
 def _trend_filter_long(ind_1h: Indicators1h, trend_strength_min: float) -> bool:
     if not (ind_1h.close > ind_1h.ema60 and ind_1h.ema20 > ind_1h.ema60 and ind_1h.rsi14 > 50):
         return False
@@ -137,7 +153,23 @@ def _calc_targets(entry: float, stop: float) -> tuple[float, float]:
     return tp1, tp2
 
 
-def on_15m_close(ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
+class BaseStrategy(IStrategy):
+    """Current single-strategy implementation, now conforming to IStrategy."""
+
+    id: str = "default"
+
+    def on_state_restore(self, ctx: StrategyContext) -> None:
+        # nothing extra to restore for stateless logic; placeholder for future
+        return
+
+    def on_bar_close(self, ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
+        return _on_15m_close(ctx)
+
+    def on_tick(self, ctx: StrategyContext, price: float) -> Optional[ExitAction]:
+        return _on_realtime_update(ctx, price)
+
+
+def _on_15m_close(ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
     # If position open, evaluate trend-failure exit on close
     if ctx.position is not None:
         pos = ctx.position
@@ -205,7 +237,7 @@ def on_15m_close(ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
     return None
 
 
-def on_realtime_update(ctx: StrategyContext, price: float) -> Optional[ExitAction]:
+def _on_realtime_update(ctx: StrategyContext, price: float) -> Optional[ExitAction]:
     pos = ctx.position
     if pos is None:
         return None
