@@ -235,6 +235,9 @@ const handleStrategyChange = async (strategy) => {
 }
 
 onMounted(async () => {
+  // 强制滚动到页面顶部，解决自动滚动到图表的问题
+  window.scrollTo({ top: 0, behavior: 'auto' })
+  
   await loadStrategies()
   if (currentStrategy.value) {
     await loadStatus()
@@ -246,6 +249,11 @@ onMounted(async () => {
     initStatusWs()
     startCountdown()
   }
+  
+  // 再次滚动到顶部，确保所有组件加载完成后页面仍在顶部
+  setTimeout(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' })
+  }, 100)
 })
 
 onUnmounted(() => {
