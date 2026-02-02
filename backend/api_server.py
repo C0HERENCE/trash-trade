@@ -195,6 +195,12 @@ async def get_status(strategy: Optional[str] = Query(None)) -> Dict[str, Any]:
     return payload
 
 
+@app.get("/api/strategies")
+async def get_strategies() -> Dict[str, Any]:
+    items = [{"id": s.id, "type": s.type} for s in settings.strategies]
+    return {"default": DEFAULT_STRATEGY, "items": items}
+
+
 async def _db() -> Database:
     db = Database(settings.storage.sqlite_path)
     await db.connect()

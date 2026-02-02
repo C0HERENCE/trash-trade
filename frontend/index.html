@@ -144,6 +144,14 @@
       opacity: 0.4;
       cursor: not-allowed;
     }
+    .select {
+      background: #232838;
+      color: var(--text);
+      border: 1px solid #2d3242;
+      padding: 6px 8px;
+      border-radius: 8px;
+      font-size: 12px;
+    }
     .btn:hover {
       border-color: #3a4155;
     }
@@ -176,6 +184,8 @@
   <header>
     <h1>Trash-Trade / BTCUSDT</h1>
     <div class="row">
+      <label for="strategy_select" style="color:var(--muted);margin-right:6px;">策略</label>
+      <select id="strategy_select" class="select"></select>
       <span class="value" id="countdown">--:--</span>
       <button class="btn" id="ws_connect" style="margin-left:10px;">连接</button>
     </div>
@@ -291,8 +301,13 @@
       return idx >= 0 ? path.slice(0, idx) : '';
     })();
     const api = (p) => `${basePath}${p}`;
+    let currentStrategy = null;
     const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4);
     const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--';
+    const withStrategy = (url) => {
+      if (!currentStrategy) return url;
+      return url + (url.includes('?') ? '&' : '?') + `strategy=${encodeURIComponent(currentStrategy)}`;
+    };
 
     const chartEl = document.getElementById('chart');
     const subEl = document.getElementById('subchart');
@@ -387,7 +402,7 @@
     const tradesPageSize = 20;
     async function loadTrades() {
       const offset = tradesPage * tradesPageSize;
-      const res = await fetch(api(`/api/trades?limit=${tradesPageSize}&offset=${offset}`));
+      const res = await fetch(withStrategy(api(`/api/trades?limit=${tradesPageSize}&offset=${offset}`)));
       const data = await res.json();
       const rows = (data.items || []).map(t => {
         const ts = fmtTs(t.timestamp);
@@ -449,7 +464,7 @@
     const ledgerPageSize = 20;
     async function loadLedger() {
       const offset = ledgerPage * ledgerPageSize;
-      const res = await fetch(api(`/api/ledger?limit=${ledgerPageSize}&offset=${offset}`));
+      const res = await fetch(withStrategy(api(`/api/ledger?limit=${ledgerPageSize}&offset=${offset}`)));
       const data = await res.json();
       const rows = (data.items || []).map(t => {
         const ts = fmtTs(t.timestamp);
@@ -479,7 +494,7 @@
     }
 
     async function loadStats() {
-      const res = await fetch(api('/api/stats'));
+      const res = await fetch(withStrategy(api('/api/stats')));
       const s = await res.json();
       el('stat_roi').textContent = (s.roi * 100).toFixed(2) + '%';
       el('stat_tp1').textContent = (s.tp1_rate * 100).toFixed(2) + '%';
@@ -612,7 +627,8 @@
 
     function initWs() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      wsStream = new WebSocket(`${proto}://${location.host}${basePath}/ws/stream`);
+      const url = withStrategy(`${proto}://${location.host}${basePath}/ws/stream`);
+      wsStream = new WebSocket(url);
       wsStream.binaryType = 'arraybuffer';
       wsStream.onmessage = async (ev) => {
         const payload = await decodeMessage(ev.data);
@@ -623,7 +639,8 @@
 
     function initStatusWs() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      wsStatus = new WebSocket(`${proto}://${location.host}${basePath}/ws/status`);
+      const url = withStrategy(`${proto}://${location.host}${basePath}/ws/status`);
+      wsStatus = new WebSocket(url);
       wsStatus.binaryType = 'arraybuffer';
       wsStatus.onmessage = async (ev) => {
         const payload = await decodeMessage(ev.data);
@@ -653,16 +670,30 @@
       initStatusWs();
       startCountdown();
     });
+    el('strategy_select').addEventListener('change', async (ev) => {
+      currentStrategy = ev.target.value;
+      tradesPage = 0;
+      ledgerPage = 0;
+      await loadTrades();
+      await loadLedger();
+      await loadStats();
+      stopStreams();
+      initWs();
+      initStatusWs();
+      startCountdown();
+    });
 
+    loadStrategies().then(async () => {
+      await loadTrades();
+      await loadLedger();
+      await loadStats();
+      initWs();
+      initStatusWs();
+      startCountdown();
+    });
     loadHistory();
     loadIndicatorHistory();
-    loadTrades();
-    loadLedger();
-    loadStats();
     renderCountdown();
-    initWs();
-    initStatusWs();
-    startCountdown();
     resizeCharts();
     window.addEventListener('resize', resizeCharts);
     const ro = new ResizeObserver(() => resizeCharts());
@@ -671,3 +702,12 @@
   </script>
 </body>
 </html>
+    async function loadStrategies() {
+      const res = await fetch(api('/api/strategies'));
+      const data = await res.json();
+      const select = el('strategy_select');
+      const items = data.items || [];
+      select.innerHTML = items.map(x => `<option value="${x.id}">${x.id} (${x.type})</option>`).join('');
+      currentStrategy = data.default || (items[0] ? items[0].id : null);
+      if (currentStrategy) select.value = currentStrategy;
+    }
