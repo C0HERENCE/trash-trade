@@ -534,6 +534,12 @@
         currentStrategy = items[0] ? items[0].id : null;
       }
       if (currentStrategy) select.value = currentStrategy;
+      if (currentStrategy) {
+        localStorage.setItem(STRATEGY_STORAGE_KEY, currentStrategy);
+        const url = new URL(window.location.href);
+        url.searchParams.set('strategy', currentStrategy);
+        window.history.replaceState({}, '', url.toString());
+      }
     }
 
     function addMarker(ev) {
@@ -763,9 +769,11 @@
     }
 
     el('share_link').addEventListener('click', async () => {
-      if (!currentStrategy) return;
+      const selected = el('strategy_select')?.value;
+      const sid = selected || currentStrategy;
+      if (!sid) return;
       const url = new URL(window.location.href);
-      url.searchParams.set('strategy', currentStrategy);
+      url.searchParams.set('strategy', sid);
       const shareUrl = url.toString();
       try {
         if (navigator.share) {
