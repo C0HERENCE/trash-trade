@@ -1,5 +1,5 @@
-# Example configuration for trash-trade
-# Copy to configs/config.yaml and override with env vars where needed.
+# Global runtime config (shared infra only).
+# Strategy-specific params should live in per-strategy yaml files.
 
 app:
   env: dev
@@ -12,89 +12,17 @@ binance:
   symbol: "BTCUSDT"
   intervals: ["15m", "1h"]
   ws_reconnect:
-    max_retries: 0         # 0 means infinite
+    max_retries: 0
     base_delay_ms: 500
     max_delay_ms: 10000
 
-sim:
-  initial_capital: 1000.0
-  max_leverage: 20
-  fee_rate: 0.0004
-  slippage: 0.0
-
-risk:
-  max_position_notional: 20000.0   # absolute cap
-  max_position_pct_equity: 1.0     # 1.0 = 100% equity
-  liquidation_buffer_pct: 0.0      # deprecated when using mmr_tiers; keep 0
-  allow_reduce_only: true
-  mmr_tiers:
-    # Binance BTCUSDT 125x bracket (public table, 2025/2026 reference; adjust via API if更新)
-    # Sorted ascending; first tier where notional <= notional_usdt is used
-    - notional_usdt: 300000      # 0-300k
-      mmr: 0.0040                # 0.40%
-      maint_amount: 0
-    - notional_usdt: 1000000     # 300k-1m
-      mmr: 0.0050                # 0.50%
-      maint_amount: 0
-    - notional_usdt: 3000000     # 1m-3m
-      mmr: 0.0100                # 1.00%
-      maint_amount: 0
-    - notional_usdt: 10000000    # 3m-10m
-      mmr: 0.0250                # 2.50%
-      maint_amount: 0
-    - notional_usdt: 20000000    # 10m-20m
-      mmr: 0.0500                # 5.00%
-      maint_amount: 0
-    - notional_usdt: 50000000    # 20m-50m
-      mmr: 0.1000                # 10.00%
-      maint_amount: 0
-    - notional_usdt: 100000000   # 50m-100m
-      mmr: 0.1250                # 12.50%
-      maint_amount: 0
-    - notional_usdt: 200000000   # 100m-200m
-      mmr: 0.1500                # 15.00%
-      maint_amount: 0
-    - notional_usdt: 300000000   # 200m-300m
-      mmr: 0.2500                # 25.00%
-      maint_amount: 0
-    - notional_usdt: 500000000   # 300m-500m
-      mmr: 0.5000                # 50.00%
-      maint_amount: 0
-    - notional_usdt: 1000000000  # fallback
-      mmr: 0.5000
-      maint_amount: 0
-
-indicators:
-  rsi:
-    length: 14
-  ema_fast:
-    length: 12
-  ema_slow:
-    length: 26
-  macd:
-    fast: 12
-    slow: 26
-    signal: 9
-  atr:
-    length: 14
-  ema_trend:
-    fast: 20
-    slow: 60
-
-strategy:
-  trend_strength_min: 0.003
-  atr_stop_mult: 1.5
-  cooldown_after_stop: 4
-  rsi_long_lower: 50
-  rsi_long_upper: 60
-  rsi_short_upper: 50
-  rsi_short_lower: 40
-  rsi_slope_required: true
-
-cooldown:
-  enabled: true
-  bars_after_exit: 2
-  min_ms_after_exit: 900000        # 15m
+strategies:
+  - id: default
+    type: test
+    config_path: "./configs/strategies/default.test.yaml"
+  - id: dual_ma_test
+    type: ma_cross
+    config_path: "./configs/strategies/dual_ma_test.ma_cross.yaml"
 
 kline_cache:
   max_bars_15m: 2000
@@ -124,8 +52,8 @@ api:
   host: "0.0.0.0"
   port: 8000
   cors_allow_origins: ["*"]
-  ws_push_interval: "raw"   # "raw" for every update, or seconds like 5/10/15
-  base_path: ""              # e.g. "/app/trash-trade" when behind nginx subpath
+  ws_push_interval: "raw"
+  base_path: ""
 
 frontend:
   static_path: "./frontend/dist"

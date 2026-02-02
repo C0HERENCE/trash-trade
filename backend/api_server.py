@@ -5,9 +5,11 @@ import json
 import zlib
 import logging
 import time
+from pathlib import Path
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional
+import yaml
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -131,6 +133,29 @@ settings = load_settings()
 app = FastAPI(title="trash-trade", root_path=settings.api.base_path or "")
 _strategy_ids = [s.id for s in settings.strategies]
 DEFAULT_STRATEGY = "default" if "default" in _strategy_ids else (_strategy_ids[0] if _strategy_ids else "default")
+
+
+def _strategy_initial_capital(strategy_id: str) -> float:
+    for s in settings.strategies:
+        if s.id != strategy_id:
+            continue
+        if s.initial_capital is not None:
+            return float(s.initial_capital)
+        if s.config_path:
+            p = Path(s.config_path)
+            if not p.is_absolute():
+                p = (Path.cwd() / p).resolve()
+            if p.exists():
+                loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    sim = loaded.get("sim")
+                    if isinstance(sim, dict) and "initial_capital" in sim:
+                        try:
+                            return float(sim["initial_capital"])
+                        except (TypeError, ValueError):
+                            pass
+        break
+    return float(settings.sim.initial_capital)
 
 # Hooks injected from main/runtime
 runtime_state_provider = None  # callable returning dict
@@ -277,7 +302,7 @@ async def get_stats(strategy: Optional[str] = Query(None)) -> Dict[str, Any]:
     latest_equity = await db.get_latest_equity(strategy=sid)
     await db.close()
 
-    initial = settings.sim.initial_capital
+    initial = _strategy_initial_capital(sid)
     equity = latest_equity if latest_equity is not None else initial
     roi = (equity - initial) / initial if initial > 0 else 0.0
 

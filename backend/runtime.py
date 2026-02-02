@@ -6,6 +6,9 @@ import httpx
 import time
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Iterable
+from pathlib import Path
+
+import yaml
 
 from .alerts import AlertManager
 from .config import Settings
@@ -62,6 +65,7 @@ class RuntimeEngine:
         self._positions: dict[str, Optional[PositionState]] = {}
         self._cooldowns: dict[str, int] = {}
         self._accounts: dict[str, AccountState] = {}
+        self._profiles: dict[str, Dict[str, Any]] = {}
 
         self._last_rsi_15m: dict[str, Optional[float]] = {}
         self._prev_macd_hist_15m: dict[str, Optional[float]] = {}
@@ -74,6 +78,54 @@ class RuntimeEngine:
 
     # ---------------------- init helpers ----------------------
 
+    @staticmethod
+    def _deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
+        for k, v in src.items():
+            if isinstance(v, dict) and isinstance(dst.get(k), dict):
+                RuntimeEngine._deep_update(dst[k], v)
+            else:
+                dst[k] = v
+        return dst
+
+    def _build_strategy_profile(self, entry) -> Dict[str, Any]:
+        profile: Dict[str, Any] = {
+            "sim": {
+                "initial_capital": self._settings.sim.initial_capital,
+                "max_leverage": self._settings.sim.max_leverage,
+                "fee_rate": self._settings.sim.fee_rate,
+                "slippage": self._settings.sim.slippage,
+            },
+            "risk": {
+                "max_position_notional": self._settings.risk.max_position_notional,
+                "max_position_pct_equity": self._settings.risk.max_position_pct_equity,
+                "mmr_tiers": self._settings.risk.mmr_tiers,
+            },
+            "strategy": {
+                "trend_strength_min": self._settings.strategy.trend_strength_min,
+                "atr_stop_mult": self._settings.strategy.atr_stop_mult,
+                "cooldown_after_stop": self._settings.strategy.cooldown_after_stop,
+                "rsi_long_lower": self._settings.strategy.rsi_long_lower,
+                "rsi_long_upper": self._settings.strategy.rsi_long_upper,
+                "rsi_short_upper": self._settings.strategy.rsi_short_upper,
+                "rsi_short_lower": self._settings.strategy.rsi_short_lower,
+                "rsi_slope_required": self._settings.strategy.rsi_slope_required,
+            },
+        }
+
+        if entry.config_path:
+            cfg_path = Path(entry.config_path)
+            if not cfg_path.is_absolute():
+                cfg_path = (Path.cwd() / cfg_path).resolve()
+            if cfg_path.exists():
+                loaded = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    self._deep_update(profile, loaded)
+        if isinstance(entry.params, dict) and entry.params:
+            self._deep_update(profile, entry.params)
+        if entry.initial_capital is not None:
+            profile["sim"]["initial_capital"] = entry.initial_capital
+        return profile
+
     def _init_strategies(self) -> None:
         # build strategies from config
         for s in self._settings.strategies:
@@ -84,7 +136,9 @@ class RuntimeEngine:
                 strat = TestStrategy()
             strat.id = s.id
             self._strategies[s.id] = strat
-            init_cap = s.initial_capital or self._settings.sim.initial_capital
+            profile = self._build_strategy_profile(s)
+            self._profiles[s.id] = profile
+            init_cap = float(profile["sim"]["initial_capital"])
             self._accounts[s.id] = AccountState(
                 balance=init_cap,
                 equity=init_cap,
@@ -353,6 +407,7 @@ class RuntimeEngine:
         )
 
         for sid, strat in self._strategies.items():
+            strategy_cfg = self._profiles[sid]["strategy"]
             prev_rsi = self._last_rsi_15m.get(sid)
             prev_macd = self._prev_macd_hist_15m.get(sid)
             prev2_macd = self._prev2_macd_hist_15m.get(sid)
@@ -379,14 +434,14 @@ class RuntimeEngine:
                 structure_stop=None,
                 position=self._positions.get(sid),
                 cooldown_bars_remaining=self._cooldowns.get(sid, 0),
-                trend_strength_min=self._settings.strategy.trend_strength_min,
-                atr_stop_mult=self._settings.strategy.atr_stop_mult,
-                cooldown_after_stop=self._settings.strategy.cooldown_after_stop,
-                rsi_long_lower=self._settings.strategy.rsi_long_lower,
-                rsi_long_upper=self._settings.strategy.rsi_long_upper,
-                rsi_short_upper=self._settings.strategy.rsi_short_upper,
-                rsi_short_lower=self._settings.strategy.rsi_short_lower,
-                rsi_slope_required=self._settings.strategy.rsi_slope_required,
+                trend_strength_min=float(strategy_cfg["trend_strength_min"]),
+                atr_stop_mult=float(strategy_cfg["atr_stop_mult"]),
+                cooldown_after_stop=int(strategy_cfg["cooldown_after_stop"]),
+                rsi_long_lower=float(strategy_cfg["rsi_long_lower"]),
+                rsi_long_upper=float(strategy_cfg["rsi_long_upper"]),
+                rsi_short_upper=float(strategy_cfg["rsi_short_upper"]),
+                rsi_short_lower=float(strategy_cfg["rsi_short_lower"]),
+                rsi_slope_required=bool(strategy_cfg["rsi_slope_required"]),
             )
             signal = strat.on_bar_close(ctx)
             if isinstance(signal, EntrySignal):
@@ -404,6 +459,7 @@ class RuntimeEngine:
         await self._snapshot_equity()
 
     def _compute_conditions(self, sid: str, bar: KlineBar, ind_15m: Indicators15m) -> dict:
+        strategy_cfg = self._profiles[sid]["strategy"]
         def item(
             label: str,
             ok: bool,
@@ -437,12 +493,12 @@ class RuntimeEngine:
         cond_short.append(item("1h方向过滤", short_dir, info=f"close:{self._ind_1h.close:.2f}, ema60:{self._ind_1h.ema60:.2f}, ema20:{self._ind_1h.ema20:.2f}, rsi:{self._ind_1h.rsi14:.2f}"))
 
         strength = abs(self._ind_1h.ema20 - self._ind_1h.ema60) / self._ind_1h.close
-        strength_ok = strength >= self._settings.strategy.trend_strength_min
+        strength_ok = strength >= float(strategy_cfg["trend_strength_min"])
         cond_long.append(
-            item("1h趋势强度", strength_ok, value=strength, target=f">={self._settings.strategy.trend_strength_min:.4f}")
+            item("1h趋势强度", strength_ok, value=strength, target=f">={float(strategy_cfg['trend_strength_min']):.4f}")
         )
         cond_short.append(
-            item("1h趋势强度", strength_ok, value=strength, target=f">={self._settings.strategy.trend_strength_min:.4f}")
+            item("1h趋势强度", strength_ok, value=strength, target=f">={float(strategy_cfg['trend_strength_min']):.4f}")
         )
 
         price_long = bar.low <= ind_15m.ema20 and bar.close > ind_15m.ema60
@@ -467,15 +523,15 @@ class RuntimeEngine:
         rsi_slope = ind_15m.rsi14 - prev_rsi if prev_rsi is not None else None
 
         rsi_long_ok = (
-            ind_15m.rsi14 >= self._settings.strategy.rsi_long_lower
-            and ind_15m.rsi14 <= self._settings.strategy.rsi_long_upper
+            ind_15m.rsi14 >= float(strategy_cfg["rsi_long_lower"])
+            and ind_15m.rsi14 <= float(strategy_cfg["rsi_long_upper"])
         )
         rsi_short_ok = (
-            ind_15m.rsi14 <= self._settings.strategy.rsi_short_upper
-            and ind_15m.rsi14 >= self._settings.strategy.rsi_short_lower
+            ind_15m.rsi14 <= float(strategy_cfg["rsi_short_upper"])
+            and ind_15m.rsi14 >= float(strategy_cfg["rsi_short_lower"])
         )
 
-        if self._settings.strategy.rsi_slope_required and prev_rsi is not None:
+        if bool(strategy_cfg["rsi_slope_required"]) and prev_rsi is not None:
             rsi_long_ok = rsi_long_ok and (ind_15m.rsi14 > prev_rsi)
             rsi_short_ok = rsi_short_ok and (ind_15m.rsi14 < prev_rsi)
 
@@ -484,8 +540,8 @@ class RuntimeEngine:
                 "RSI区间/斜率(多)",
                 rsi_long_ok,
                 value=ind_15m.rsi14,
-                target=f"{self._settings.strategy.rsi_long_lower}-{self._settings.strategy.rsi_long_upper}",
-                info="斜率需向上" if self._settings.strategy.rsi_slope_required else None,
+                target=f"{float(strategy_cfg['rsi_long_lower'])}-{float(strategy_cfg['rsi_long_upper'])}",
+                info="斜率需向上" if bool(strategy_cfg["rsi_slope_required"]) else None,
                 slope=rsi_slope,
             )
         )
@@ -494,8 +550,8 @@ class RuntimeEngine:
                 "RSI区间/斜率(空)",
                 rsi_short_ok,
                 value=ind_15m.rsi14,
-                target=f"{self._settings.strategy.rsi_short_lower}-{self._settings.strategy.rsi_short_upper}",
-                info="斜率需向下" if self._settings.strategy.rsi_slope_required else None,
+                target=f"{float(strategy_cfg['rsi_short_lower'])}-{float(strategy_cfg['rsi_short_upper'])}",
+                info="斜率需向下" if bool(strategy_cfg["rsi_slope_required"]) else None,
                 slope=rsi_slope,
             )
         )
@@ -554,6 +610,7 @@ class RuntimeEngine:
         )
 
         for sid, strat in self._strategies.items():
+            strategy_cfg = self._profiles[sid]["strategy"]
             ctx = StrategyContext(
                 price=bar.close,
                 close_15m=bar.close,
@@ -568,14 +625,14 @@ class RuntimeEngine:
                 structure_stop=None,
                 position=self._positions.get(sid),
                 cooldown_bars_remaining=self._cooldowns.get(sid, 0),
-                trend_strength_min=self._settings.strategy.trend_strength_min,
-                atr_stop_mult=self._settings.strategy.atr_stop_mult,
-                cooldown_after_stop=self._settings.strategy.cooldown_after_stop,
-                rsi_long_lower=self._settings.strategy.rsi_long_lower,
-                rsi_long_upper=self._settings.strategy.rsi_long_upper,
-                rsi_short_upper=self._settings.strategy.rsi_short_upper,
-                rsi_short_lower=self._settings.strategy.rsi_short_lower,
-                rsi_slope_required=self._settings.strategy.rsi_slope_required,
+                trend_strength_min=float(strategy_cfg["trend_strength_min"]),
+                atr_stop_mult=float(strategy_cfg["atr_stop_mult"]),
+                cooldown_after_stop=int(strategy_cfg["cooldown_after_stop"]),
+                rsi_long_lower=float(strategy_cfg["rsi_long_lower"]),
+                rsi_long_upper=float(strategy_cfg["rsi_long_upper"]),
+                rsi_short_upper=float(strategy_cfg["rsi_short_upper"]),
+                rsi_short_lower=float(strategy_cfg["rsi_short_lower"]),
+                rsi_slope_required=bool(strategy_cfg["rsi_slope_required"]),
             )
             conditions = self._compute_conditions(sid=sid, bar=bar, ind_15m=ind_15m)
             await self._stream_store.update_snapshot(last_signal={"t": "cond", "sid": sid, "c": conditions})
@@ -589,14 +646,16 @@ class RuntimeEngine:
         if self._positions.get(sid) is not None:
             return
         acc = self._accounts[sid]
+        sim_cfg = self._profiles[sid]["sim"]
+        risk_cfg = self._profiles[sid]["risk"]
         notional_cap = min(
-            self._settings.risk.max_position_notional,
-            acc.balance * self._settings.risk.max_position_pct_equity * self._settings.sim.max_leverage,
+            float(risk_cfg["max_position_notional"]),
+            acc.balance * float(risk_cfg["max_position_pct_equity"]) * float(sim_cfg["max_leverage"]),
         )
         qty = notional_cap / signal.entry_price
         notional = qty * signal.entry_price
-        fee = notional * self._settings.sim.fee_rate
-        margin = notional / self._settings.sim.max_leverage
+        fee = notional * float(sim_cfg["fee_rate"])
+        margin = notional / float(sim_cfg["max_leverage"])
         acc.balance -= fee
 
         pos = PositionState(
@@ -619,7 +678,7 @@ class RuntimeEngine:
                 qty=qty,
                 entry_price=signal.entry_price,
                 entry_time=now_ms,
-                leverage=self._settings.sim.max_leverage,
+                leverage=int(sim_cfg["max_leverage"]),
                 margin=margin,
                 stop_price=signal.stop_price,
                 tp1_price=signal.tp1_price,
@@ -644,7 +703,7 @@ class RuntimeEngine:
                 qty=qty,
                 notional=notional,
                 fee_amount=fee,
-                fee_rate=self._settings.sim.fee_rate,
+                fee_rate=float(sim_cfg["fee_rate"]),
                 timestamp=now_ms,
                 reason=signal.reason,
                 created_at=now_ms,
@@ -676,7 +735,7 @@ class RuntimeEngine:
                 "qty": qty,
                 "notional": notional,
                 "fee_amount": fee,
-                "fee_rate": self._settings.sim.fee_rate,
+                "fee_rate": float(sim_cfg["fee_rate"]),
                 "timestamp": now_ms,
                 "reason": signal.reason,
             }
@@ -709,6 +768,7 @@ class RuntimeEngine:
             return
         pos = self._positions[sid]
         acc = self._accounts[sid]
+        sim_cfg = self._profiles[sid]["sim"]
         qty_to_close = pos.qty
 
         if action.action == "TP1" and not pos.tp1_hit:
@@ -718,7 +778,7 @@ class RuntimeEngine:
 
         realized = self._calc_realized_pnl(pos, action.price, qty_to_close)
         notional = qty_to_close * action.price
-        fee = notional * self._settings.sim.fee_rate
+        fee = notional * float(sim_cfg["fee_rate"])
 
         acc.balance += realized - fee
 
@@ -738,7 +798,7 @@ class RuntimeEngine:
                 qty=qty_to_close,
                 notional=notional,
                 fee_amount=fee,
-                fee_rate=self._settings.sim.fee_rate,
+                fee_rate=float(sim_cfg["fee_rate"]),
                 timestamp=now_ms,
                 reason=action.reason,
                 created_at=now_ms,
@@ -768,7 +828,7 @@ class RuntimeEngine:
             "qty": qty_to_close,
             "notional": notional,
             "fee_amount": fee,
-            "fee_rate": self._settings.sim.fee_rate,
+            "fee_rate": float(sim_cfg["fee_rate"]),
             "timestamp": now_ms,
             "reason": action.reason,
         }
@@ -786,7 +846,7 @@ class RuntimeEngine:
                     qty=pos.qty,
                     entry_price=pos.entry_price,
                     entry_time=row["entry_time"],
-                    leverage=self._settings.sim.max_leverage,
+                    leverage=int(sim_cfg["max_leverage"]),
                     margin=row["margin"],
                     stop_price=pos.stop_price,
                     tp1_price=pos.tp1_price,
@@ -824,7 +884,7 @@ class RuntimeEngine:
         )
 
         if action.action == "STOP":
-            self._cooldowns[sid] = self._settings.strategy.cooldown_after_stop
+            self._cooldowns[sid] = int(self._profiles[sid]["strategy"]["cooldown_after_stop"])
 
         await self._stream_store.add_event(
             {"type": "exit", "sid": sid, "side": pos.side, "price": action.price, "ts": now_ms, "reason": action.reason}
@@ -860,13 +920,13 @@ class RuntimeEngine:
 
     def _calc_liq_price(self, sid: str, entry_price: float, side: str) -> float:
         # Binance-like isolated estimate: margin + PnL = maint_margin
-        lev = self._settings.sim.max_leverage
+        lev = float(self._profiles[sid]["sim"]["max_leverage"])
         pos = self._positions.get(sid)
         qty = pos.qty if pos else 0.0
         if qty <= 0:
             return entry_price
         notional_entry = entry_price * qty
-        mmr, maint_amt = self._select_mmr(notional_entry)
+        mmr, maint_amt = self._select_mmr(sid, notional_entry)
         margin = notional_entry / lev
         if side == "LONG":
             # margin + (Pliq - entry)*qty = Pliq*qty*mmr + maint_amt
@@ -879,8 +939,8 @@ class RuntimeEngine:
             denom = (1.0 + mmr) * qty
             return num / denom if denom != 0 else entry_price
 
-    def _select_mmr(self, notional: float) -> tuple[float, float]:
-        tiers = sorted(self._settings.risk.mmr_tiers, key=lambda x: x["notional_usdt"])
+    def _select_mmr(self, sid: str, notional: float) -> tuple[float, float]:
+        tiers = sorted(self._profiles[sid]["risk"]["mmr_tiers"], key=lambda x: x["notional_usdt"])
         for t in tiers:
             if notional <= t["notional_usdt"]:
                 return float(t["mmr"]), float(t.get("maint_amount", 0.0))
@@ -897,7 +957,7 @@ class RuntimeEngine:
             if pos is not None:
                 upl = self._calc_realized_pnl(pos, price, pos.qty)
                 notional = pos.qty * price
-                margin_used = notional / self._settings.sim.max_leverage
+                margin_used = notional / float(self._profiles[sid]["sim"]["max_leverage"])
                 liq = self._calc_liq_price(sid, pos.entry_price, pos.side)
 
             equity = acc.balance + upl
