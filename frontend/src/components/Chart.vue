@@ -121,7 +121,7 @@ onUnmounted(() => {
 <template>
   <div class="card">
     <h2>15m K 线 + EMA</h2>
-    <div ref="chartContainer" id="chart" style="height: clamp(220px, 40vh, 420px); width: 100%;"></div>
+    <div ref="chartContainer" id="chart" style="height: clamp(220px, 30vh, 420px); width: 100%;"></div>
   </div>
 </template>
 
