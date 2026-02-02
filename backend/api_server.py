@@ -213,11 +213,47 @@ def _stream_to_dict(s: StreamSnapshot, events: List[Dict[str, Any]]) -> Dict[str
     }
 
 
+def _status_from_runtime(strategy: str) -> Optional[Dict[str, Any]]:
+    if runtime_state_provider is None:
+        return None
+    try:
+        rs = runtime_state_provider() or {}
+        strat = (rs.get("strategies") or {}).get(strategy)
+        if not strat:
+            return None
+        return {
+            "timestamp": int(time.time() * 1000),
+            "balance": strat.get("balance"),
+            "equity": strat.get("equity"),
+            "upl": strat.get("upl"),
+            "margin_used": strat.get("margin_used"),
+            "free_margin": strat.get("free_margin"),
+            "liq_price": strat.get("liq_price"),
+            "position": strat.get("position") or {
+                "side": None,
+                "qty": None,
+                "entry_price": None,
+                "stop_price": None,
+                "tp1_price": None,
+                "tp2_price": None,
+            },
+            "cooldown_bars": strat.get("cooldown_bars", 0),
+            "strategy": strategy,
+        }
+    except Exception:
+        logger.exception("build status from runtime failed")
+        return None
+
+
 @app.get("/api/status")
 async def get_status(strategy: Optional[str] = Query(None)) -> Dict[str, Any]:
+    sid = strategy or DEFAULT_STRATEGY
+    rt = _status_from_runtime(sid)
+    if rt is not None:
+        return rt
     s = await status_store.get()
     payload = _status_to_dict(s)
-    payload["strategy"] = strategy or DEFAULT_STRATEGY
+    payload["strategy"] = sid
     return payload
 
 
@@ -440,9 +476,11 @@ async def ws_status(websocket: WebSocket) -> None:
         sleep_s: Optional[float] = None if interval == "raw" else float(interval)
         sid = websocket.query_params.get("strategy") or DEFAULT_STRATEGY
         while True:
-            s = await status_store.get()
-            payload = _status_to_dict(s)
-            payload["strategy"] = sid
+            payload = _status_from_runtime(sid)
+            if payload is None:
+                s = await status_store.get()
+                payload = _status_to_dict(s)
+                payload["strategy"] = sid
             payload = msgpack.packb(payload, use_bin_type=True)
             await websocket.send_bytes(zlib.compress(payload))
             if sleep_s is None:

@@ -1004,20 +1004,31 @@ class RuntimeEngine:
             )
 
     def runtime_state(self) -> dict:
+        strategies = {}
+        for sid in self._strategies.keys():
+            pos = self._positions.get(sid)
+            acc = self._accounts.get(sid)
+            liq = self._calc_liq_price(sid, pos.entry_price, pos.side) if pos else None
+            strategies[sid] = {
+                "balance": acc.balance if acc else None,
+                "equity": acc.equity if acc else None,
+                "upl": acc.upl if acc else None,
+                "margin_used": acc.margin_used if acc else None,
+                "free_margin": acc.free_margin if acc else None,
+                "liq_price": liq,
+                "position": {
+                    "side": pos.side if pos else None,
+                    "qty": pos.qty if pos else None,
+                    "entry_price": pos.entry_price if pos else None,
+                    "stop_price": pos.stop_price if pos else None,
+                    "tp1_price": pos.tp1_price if pos else None,
+                    "tp2_price": pos.tp2_price if pos else None,
+                },
+                "cooldown_bars": self._cooldowns.get(sid, 0),
+            }
         return {
             "buffers": {k: len(self._buffers.buffer(k)) for k in self._buffers.intervals()} if self._buffers else {},
-            "strategies": {
-                sid: {
-                    "position": {
-                        "side": self._positions[sid].side if self._positions.get(sid) else None,
-                        "qty": self._positions[sid].qty if self._positions.get(sid) else None,
-                        "entry": self._positions[sid].entry_price if self._positions.get(sid) else None,
-                    },
-                    "cooldown_bars": self._cooldowns.get(sid, 0),
-                    "equity": self._accounts[sid].equity if sid in self._accounts else None,
-                }
-                for sid in self._strategies.keys()
-            },
+            "strategies": strategies,
         }
 
     async def send_alert(self, level: str, title: str, message: str) -> None:
