@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -179,4 +180,33 @@ def load_settings(config_path: Optional[str] = None) -> Settings:
         loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             data = loaded
-    return Settings(**data)
+
+    def deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
+        for k, v in src.items():
+            if isinstance(v, dict) and isinstance(dst.get(k), dict):
+                deep_update(dst[k], v)
+            else:
+                dst[k] = v
+        return dst
+
+    def env_overrides() -> Dict[str, Any]:
+        out: Dict[str, Any] = {}
+        valid_roots = set(Settings.model_fields.keys())
+        for key, value in os.environ.items():
+            if "__" not in key:
+                continue
+            parts = [p.strip().lower() for p in key.split("__") if p.strip()]
+            if not parts or parts[0] not in valid_roots:
+                continue
+            cur = out
+            for part in parts[:-1]:
+                nxt = cur.get(part)
+                if not isinstance(nxt, dict):
+                    nxt = {}
+                    cur[part] = nxt
+                cur = nxt
+            cur[parts[-1]] = value
+        return out
+
+    merged = deep_update(data, env_overrides())
+    return Settings(**merged)
