@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import * as LightweightCharts from 'lightweight-charts'
+import { createChart } from 'lightweight-charts'
 
 const chartContainer = ref(null)
 let chart = null
@@ -50,20 +50,27 @@ const resizeChart = () => {
 
 onMounted(() => {
   if (chartContainer.value) {
-    chart = LightweightCharts.createChart(chartContainer.value, {
-      layout: { background: { color: '#171a21' }, textColor: '#e6e9ef' },
-      grid: { vertLines: { color: '#242a3a' }, horzLines: { color: '#242a3a' } },
-      rightPriceScale: { borderColor: '#242a3a' },
-      timeScale: { borderColor: '#242a3a' },
-    })
-    
-    macdSeries = chart.addHistogramSeries({ color: '#7ee787' })
-    rsiSeries = chart.addLineSeries({ color: '#ff6b6b', lineWidth: 1 })
-    
-    loadIndicatorHistory()
-    
-    window.addEventListener('resize', resizeChart)
-    resizeChart()
+    try {
+      chart = createChart(chartContainer.value, {
+        layout: { background: { color: '#171a21' }, textColor: '#e6e9ef' },
+        grid: { vertLines: { color: '#242a3a' }, horzLines: { color: '#242a3a' } },
+        rightPriceScale: { borderColor: '#242a3a' },
+        timeScale: { borderColor: '#242a3a' },
+      })
+      
+      console.log('Chart created successfully:', chart)
+      console.log('Available methods:', Object.keys(chart))
+      
+      macdSeries = chart.addHistogramSeries({ color: '#7ee787' })
+      rsiSeries = chart.addLineSeries({ color: '#ff6b6b', lineWidth: 1 })
+      
+      loadIndicatorHistory()
+      
+      window.addEventListener('resize', resizeChart)
+      resizeChart()
+    } catch (error) {
+      console.error('Error creating chart:', error)
+    }
   }
 })
 

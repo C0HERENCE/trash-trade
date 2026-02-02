@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import * as LightweightCharts from 'lightweight-charts'
+import { createChart } from 'lightweight-charts'
 
 const chartContainer = ref(null)
 let chart = null
@@ -83,22 +83,29 @@ const resizeChart = () => {
 
 onMounted(() => {
   if (chartContainer.value) {
-    chart = LightweightCharts.createChart(chartContainer.value, {
-      layout: { background: { color: '#171a21' }, textColor: '#e6e9ef' },
-      grid: { vertLines: { color: '#242a3a' }, horzLines: { color: '#242a3a' } },
-      rightPriceScale: { borderColor: '#242a3a' },
-      timeScale: { borderColor: '#242a3a' },
-    })
-    
-    candleSeries = chart.addCandlestickSeries()
-    ema20Series = chart.addLineSeries({ color: '#5cc8ff', lineWidth: 1 })
-    ema60Series = chart.addLineSeries({ color: '#ffb86c', lineWidth: 1 })
-    
-    loadHistory()
-    loadIndicatorHistory()
-    
-    window.addEventListener('resize', resizeChart)
-    resizeChart()
+    try {
+      chart = createChart(chartContainer.value, {
+        layout: { background: { color: '#171a21' }, textColor: '#e6e9ef' },
+        grid: { vertLines: { color: '#242a3a' }, horzLines: { color: '#242a3a' } },
+        rightPriceScale: { borderColor: '#242a3a' },
+        timeScale: { borderColor: '#242a3a' },
+      })
+      
+      console.log('Chart created successfully:', chart)
+      console.log('Available methods:', Object.keys(chart))
+      
+      candleSeries = chart.addCandlestickSeries()
+      ema20Series = chart.addLineSeries({ color: '#5cc8ff', lineWidth: 1 })
+      ema60Series = chart.addLineSeries({ color: '#ffb86c', lineWidth: 1 })
+      
+      loadHistory()
+      loadIndicatorHistory()
+      
+      window.addEventListener('resize', resizeChart)
+      resizeChart()
+    } catch (error) {
+      console.error('Error creating chart:', error)
+    }
   }
 })
 
