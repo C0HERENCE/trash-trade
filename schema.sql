@@ -30,6 +30,7 @@ CREATE INDEX IF NOT EXISTS idx_klines_close_time
 
 CREATE TABLE IF NOT EXISTS positions (
   position_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  strategy TEXT NOT NULL DEFAULT 'default',
   symbol TEXT NOT NULL,
   side TEXT NOT NULL,          -- LONG/SHORT
   qty REAL NOT NULL,
@@ -56,11 +57,15 @@ CREATE INDEX IF NOT EXISTS idx_positions_status
 CREATE INDEX IF NOT EXISTS idx_positions_symbol_status
   ON positions(symbol, status);
 
+CREATE INDEX IF NOT EXISTS idx_positions_strategy_status
+  ON positions(strategy, status);
+
 CREATE INDEX IF NOT EXISTS idx_positions_entry_time
   ON positions(entry_time);
 
 CREATE TABLE IF NOT EXISTS trades (
   trade_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  strategy TEXT NOT NULL DEFAULT 'default',
   symbol TEXT NOT NULL,
   position_id INTEGER NOT NULL,
   side TEXT NOT NULL,          -- BUY/SELL
@@ -85,8 +90,12 @@ CREATE INDEX IF NOT EXISTS idx_trades_position
 CREATE INDEX IF NOT EXISTS idx_trades_symbol_timestamp
   ON trades(symbol, timestamp);
 
+CREATE INDEX IF NOT EXISTS idx_trades_strategy_timestamp
+  ON trades(strategy, timestamp);
+
 CREATE TABLE IF NOT EXISTS equity_snapshots (
   snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  strategy TEXT NOT NULL DEFAULT 'default',
   timestamp INTEGER NOT NULL,
   balance REAL NOT NULL,
   equity REAL NOT NULL,
@@ -98,8 +107,12 @@ CREATE TABLE IF NOT EXISTS equity_snapshots (
 CREATE INDEX IF NOT EXISTS idx_equity_snapshots_timestamp
   ON equity_snapshots(timestamp);
 
+CREATE INDEX IF NOT EXISTS idx_equity_snapshots_strategy_timestamp
+  ON equity_snapshots(strategy, timestamp);
+
 CREATE TABLE IF NOT EXISTS alerts (
   alert_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  strategy TEXT NOT NULL DEFAULT 'default',
   timestamp INTEGER NOT NULL,
   channel TEXT NOT NULL,
   level TEXT NOT NULL,         -- INFO/WARN/ERROR
@@ -122,6 +135,7 @@ CREATE TABLE IF NOT EXISTS app_state (
 
 CREATE TABLE IF NOT EXISTS ledger (
   ledger_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  strategy TEXT NOT NULL DEFAULT 'default',
   timestamp INTEGER NOT NULL,
   type TEXT NOT NULL,            -- fee / realized_pnl / funding
   amount REAL NOT NULL,          -- positive = credit, negative = debit
@@ -137,5 +151,8 @@ CREATE INDEX IF NOT EXISTS idx_ledger_timestamp
 
 CREATE INDEX IF NOT EXISTS idx_ledger_type
   ON ledger(type);
+
+CREATE INDEX IF NOT EXISTS idx_ledger_strategy_timestamp
+  ON ledger(strategy, timestamp);
 
 COMMIT;
