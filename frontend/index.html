@@ -302,6 +302,7 @@
     })();
     const api = (p) => `${basePath}${p}`;
     let currentStrategy = null;
+    const STRATEGY_STORAGE_KEY = 'trash_trade_selected_strategy';
     const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4);
     const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--';
     const withStrategy = (url) => {
@@ -517,7 +518,15 @@
       const select = el('strategy_select');
       const items = data.items || [];
       select.innerHTML = items.map(x => `<option value="${x.id}">${x.id} (${x.type})</option>`).join('');
-      currentStrategy = data.default || (items[0] ? items[0].id : null);
+      const ids = items.map(x => x.id);
+      const stored = localStorage.getItem(STRATEGY_STORAGE_KEY);
+      if (stored && ids.includes(stored)) {
+        currentStrategy = stored;
+      } else if (data.default && ids.includes(data.default)) {
+        currentStrategy = data.default;
+      } else {
+        currentStrategy = items[0] ? items[0].id : null;
+      }
       if (currentStrategy) select.value = currentStrategy;
     }
 
@@ -691,6 +700,7 @@
     });
     el('strategy_select').addEventListener('change', async (ev) => {
       currentStrategy = ev.target.value;
+      localStorage.setItem(STRATEGY_STORAGE_KEY, currentStrategy);
       tradesPage = 0;
       ledgerPage = 0;
       await loadStatus();

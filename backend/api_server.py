@@ -245,16 +245,45 @@ def _status_from_runtime(strategy: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+async def _status_from_db(strategy: str) -> Dict[str, Any]:
+    db = await _db()
+    try:
+        eq = await db.fetchone(
+            "SELECT * FROM equity_snapshots WHERE strategy=? ORDER BY timestamp DESC LIMIT 1",
+            (strategy,),
+        )
+        pos = await db.get_open_position(settings.binance.symbol, strategy=strategy)
+        payload = {
+            "timestamp": int(time.time() * 1000),
+            "balance": float(eq["balance"]) if eq else 0.0,
+            "equity": float(eq["equity"]) if eq else 0.0,
+            "upl": float(eq["upl"]) if eq else 0.0,
+            "margin_used": float(eq["margin_used"]) if eq else 0.0,
+            "free_margin": float(eq["free_margin"]) if eq else 0.0,
+            "liq_price": float(pos["liq_price"]) if pos and pos["liq_price"] is not None else None,
+            "position": {
+                "side": pos["side"] if pos else None,
+                "qty": float(pos["qty"]) if pos and pos["qty"] is not None else None,
+                "entry_price": float(pos["entry_price"]) if pos and pos["entry_price"] is not None else None,
+                "stop_price": float(pos["stop_price"]) if pos and pos["stop_price"] is not None else None,
+                "tp1_price": float(pos["tp1_price"]) if pos and pos["tp1_price"] is not None else None,
+                "tp2_price": float(pos["tp2_price"]) if pos and pos["tp2_price"] is not None else None,
+            },
+            "cooldown_bars": 0,
+            "strategy": strategy,
+        }
+        return payload
+    finally:
+        await db.close()
+
+
 @app.get("/api/status")
 async def get_status(strategy: Optional[str] = Query(None)) -> Dict[str, Any]:
     sid = strategy or DEFAULT_STRATEGY
     rt = _status_from_runtime(sid)
     if rt is not None:
         return rt
-    s = await status_store.get()
-    payload = _status_to_dict(s)
-    payload["strategy"] = sid
-    return payload
+    return await _status_from_db(sid)
 
 
 @app.get("/api/strategies")
@@ -478,9 +507,7 @@ async def ws_status(websocket: WebSocket) -> None:
         while True:
             payload = _status_from_runtime(sid)
             if payload is None:
-                s = await status_store.get()
-                payload = _status_to_dict(s)
-                payload["strategy"] = sid
+                payload = await _status_from_db(sid)
             payload = msgpack.packb(payload, use_bin_type=True)
             await websocket.send_bytes(zlib.compress(payload))
             if sleep_s is None:
