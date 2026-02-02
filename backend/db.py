@@ -236,6 +236,7 @@ class Database:
         limit: int = 100,
         since: Optional[int] = None,
         until: Optional[int] = None,
+        offset: int = 0,
     ) -> List[aiosqlite.Row]:
         sql = "SELECT * FROM trades"
         params: List[Any] = []
@@ -248,8 +249,8 @@ class Database:
             params.append(until)
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
+        sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
         return await self.fetchall(sql, params)
 
     async def get_positions(
@@ -318,6 +319,7 @@ class Database:
         limit: int = 100,
         since: Optional[int] = None,
         until: Optional[int] = None,
+        offset: int = 0,
     ) -> List[aiosqlite.Row]:
         sql = "SELECT * FROM ledger"
         params: List[Any] = []
@@ -330,6 +332,31 @@ class Database:
             params.append(until)
         if where:
             sql += " WHERE " + " AND ".join(where)
-        sql += " ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
+        sql += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
         return await self.fetchall(sql, params)
+
+    async def get_closed_position_count(self) -> int:
+        row = await self.fetchone("SELECT COUNT(*) AS c FROM positions WHERE status='CLOSED'")
+        return int(row["c"]) if row else 0
+
+    async def get_distinct_trade_reason_count(self, reason: str) -> int:
+        row = await self.fetchone(
+            "SELECT COUNT(DISTINCT position_id) AS c FROM trades WHERE reason=?",
+            (reason,),
+        )
+        return int(row["c"]) if row else 0
+
+    async def get_stop_close_count(self) -> int:
+        row = await self.fetchone(
+            "SELECT COUNT(*) AS c FROM positions WHERE status='CLOSED' AND close_reason='stop'"
+        )
+        return int(row["c"]) if row else 0
+
+    async def get_latest_equity(self) -> Optional[float]:
+        row = await self.fetchone(
+            "SELECT equity FROM equity_snapshots ORDER BY timestamp DESC LIMIT 1"
+        )
+        if row:
+            return float(row["equity"])
+        return None

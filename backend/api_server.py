@@ -201,11 +201,12 @@ async def _db() -> Database:
 @app.get("/api/trades")
 async def get_trades(
     limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     since: Optional[int] = None,
     until: Optional[int] = None,
 ) -> Dict[str, Any]:
     db = await _db()
-    rows = await db.get_trades(limit=limit, since=since, until=until)
+    rows = await db.get_trades(limit=limit, offset=offset, since=since, until=until)
     await db.close()
     return {"items": [dict(r) for r in rows]}
 
@@ -225,13 +226,40 @@ async def get_positions(
 @app.get("/api/ledger")
 async def get_ledger(
     limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
     since: Optional[int] = None,
     until: Optional[int] = None,
 ) -> Dict[str, Any]:
     db = await _db()
-    rows = await db.get_ledger(limit=limit, since=since, until=until)
+    rows = await db.get_ledger(limit=limit, offset=offset, since=since, until=until)
     await db.close()
     return {"items": [dict(r) for r in rows]}
+
+
+@app.get("/api/stats")
+async def get_stats() -> Dict[str, Any]:
+    db = await _db()
+    closed = await db.get_closed_position_count()
+    tp1 = await db.get_distinct_trade_reason_count("tp1")
+    tp2 = await db.get_distinct_trade_reason_count("tp2")
+    stops = await db.get_stop_close_count()
+    latest_equity = await db.get_latest_equity()
+    await db.close()
+
+    initial = settings.sim.initial_capital
+    equity = latest_equity if latest_equity is not None else initial
+    roi = (equity - initial) / initial if initial > 0 else 0.0
+
+    def rate(x: int) -> float:
+        return (x / closed) if closed > 0 else 0.0
+
+    return {
+        "closed_positions": closed,
+        "roi": roi,
+        "tp1_rate": rate(tp1),
+        "tp2_rate": rate(tp2),
+        "stop_rate": rate(stops),
+    }
 
 
 @app.get("/api/klines")

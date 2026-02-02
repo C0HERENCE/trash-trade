@@ -222,9 +222,22 @@
     </div>
 
     <div class="card">
+      <h2>Performance</h2>
+      <div class="row"><span>ROI</span><span class="value" id="stat_roi">--</span></div>
+      <div class="row"><span>TP1 胜率</span><span class="value" id="stat_tp1">--</span></div>
+      <div class="row"><span>TP2 胜率</span><span class="value" id="stat_tp2">--</span></div>
+      <div class="row"><span>止损率</span><span class="value" id="stat_stop">--</span></div>
+    </div>
+
+    <div class="card">
       <div class="toolbar">
         <h2>Recent Trades</h2>
-        <button class="btn" id="refresh_trades">Refresh</button>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="btn" id="prev_trades">Prev</button>
+          <span id="page_trades" style="font-size:12px;color:var(--muted);">1</span>
+          <button class="btn" id="next_trades">Next</button>
+          <button class="btn" id="refresh_trades">Refresh</button>
+        </div>
       </div>
       <div class="table-scroll">
         <table>
@@ -246,7 +259,12 @@
     <div class="card">
       <div class="toolbar">
         <h2>Ledger</h2>
-        <button class="btn" id="refresh_ledger">Refresh</button>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button class="btn" id="prev_ledger">Prev</button>
+          <span id="page_ledger" style="font-size:12px;color:var(--muted);">1</span>
+          <button class="btn" id="next_ledger">Next</button>
+          <button class="btn" id="refresh_ledger">Refresh</button>
+        </div>
       </div>
       <div class="table-scroll">
         <table>
@@ -364,8 +382,11 @@
       el('last_ts').textContent = fmtTs(data.timestamp);
     }
 
+    let tradesPage = 0;
+    const tradesPageSize = 20;
     async function loadTrades() {
-      const res = await fetch(api('/api/trades?limit=20'));
+      const offset = tradesPage * tradesPageSize;
+      const res = await fetch(api(`/api/trades?limit=${tradesPageSize}&offset=${offset}`));
       const data = await res.json();
       const rows = (data.items || []).map(t => {
         const ts = fmtTs(t.timestamp);
@@ -381,6 +402,7 @@
         </tr>`;
       }).join('');
       el('trades_body').innerHTML = rows;
+      el('page_trades').textContent = (tradesPage + 1);
     }
 
     async function loadHistory() {
@@ -419,8 +441,11 @@
       rsiSeries.setData(rsi);
     }
 
+    let ledgerPage = 0;
+    const ledgerPageSize = 20;
     async function loadLedger() {
-      const res = await fetch(api('/api/ledger?limit=20'));
+      const offset = ledgerPage * ledgerPageSize;
+      const res = await fetch(api(`/api/ledger?limit=${ledgerPageSize}&offset=${offset}`));
       const data = await res.json();
       const rows = (data.items || []).map(t => {
         const ts = fmtTs(t.timestamp);
@@ -434,6 +459,16 @@
         </tr>`;
       }).join('');
       el('ledger_body').innerHTML = rows;
+      el('page_ledger').textContent = (ledgerPage + 1);
+    }
+
+    async function loadStats() {
+      const res = await fetch(api('/api/stats'));
+      const s = await res.json();
+      el('stat_roi').textContent = (s.roi * 100).toFixed(2) + '%';
+      el('stat_tp1').textContent = (s.tp1_rate * 100).toFixed(2) + '%';
+      el('stat_tp2').textContent = (s.tp2_rate * 100).toFixed(2) + '%';
+      el('stat_stop').textContent = (s.stop_rate * 100).toFixed(2) + '%';
     }
 
     function addMarker(ev) {
@@ -592,6 +627,10 @@
 
     el('refresh_trades').addEventListener('click', loadTrades);
     el('refresh_ledger').addEventListener('click', loadLedger);
+    el('prev_trades').addEventListener('click', () => { tradesPage = Math.max(0, tradesPage - 1); loadTrades(); });
+    el('next_trades').addEventListener('click', () => { tradesPage += 1; loadTrades(); });
+    el('prev_ledger').addEventListener('click', () => { ledgerPage = Math.max(0, ledgerPage - 1); loadLedger(); });
+    el('next_ledger').addEventListener('click', () => { ledgerPage += 1; loadLedger(); });
     el('ws_connect').addEventListener('click', () => {
       stopStreams();
       initWs();
@@ -603,6 +642,7 @@
     loadIndicatorHistory();
     loadTrades();
     loadLedger();
+    loadStats();
     renderCountdown();
     initWs();
     initStatusWs();
