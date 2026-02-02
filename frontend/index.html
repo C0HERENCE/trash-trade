@@ -337,6 +337,9 @@
     let tp2Line = null;
 
     function updateStatus(data) {
+      if (data && data.strategy && currentStrategy && data.strategy !== currentStrategy) {
+        return;
+      }
       el('equity').textContent = fmt(data.equity);
       el('balance').textContent = fmt(data.balance);
       el('upl').textContent = fmt(data.upl);
@@ -421,6 +424,12 @@
       el('page_trades').textContent = (tradesPage + 1);
       tradesHasMore = (data.items || []).length === tradesPageSize;
       updateTradeButtons();
+    }
+
+    async function loadStatus() {
+      const res = await fetch(withStrategy(api('/api/status')));
+      const data = await res.json();
+      updateStatus(data);
     }
 
     async function loadHistory() {
@@ -684,6 +693,7 @@
       currentStrategy = ev.target.value;
       tradesPage = 0;
       ledgerPage = 0;
+      await loadStatus();
       await loadTrades();
       await loadLedger();
       await loadStats();
@@ -694,6 +704,7 @@
     });
 
     loadStrategies().then(async () => {
+      await loadStatus();
       await loadTrades();
       await loadLedger();
       await loadStats();
