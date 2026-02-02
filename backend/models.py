@@ -23,7 +23,6 @@ class Kline:
 
 @dataclass(slots=True)
 class Trade:
-    strategy: str = "default"
     symbol: str
     position_id: int
     side: str  # BUY/SELL
@@ -36,11 +35,11 @@ class Trade:
     timestamp: int
     reason: str
     created_at: int
+    strategy: str = "default"
 
 
 @dataclass(slots=True)
 class PositionOpen:
-    strategy: str = "default"
     symbol: str
     side: str  # LONG/SHORT
     qty: float
@@ -58,12 +57,12 @@ class PositionOpen:
     created_at: int
     updated_at: int
     position_id: Optional[int] = None
+    strategy: str = "default"
 
 
 @dataclass(slots=True)
 class PositionClose:
     position_id: int
-    strategy: str = "default"
     status: str  # CLOSED
     realized_pnl: float
     fees_total: float
@@ -71,17 +70,18 @@ class PositionClose:
     close_time: int
     close_reason: Optional[str]
     updated_at: int
+    strategy: str = "default"
 
 
 @dataclass(slots=True)
 class EquitySnapshot:
-    strategy: str = "default"
     timestamp: int
     balance: float
     equity: float
     upl: float
     margin_used: float
     free_margin: float
+    strategy: str = "default"
 
 
 @dataclass(slots=True)
@@ -98,18 +98,17 @@ class Fee:
 
 @dataclass(slots=True)
 class Alert:
-    strategy: str = "default"
     timestamp: int
     channel: str
     level: str
     message: str
     dedup_key: Optional[str]
     created_at: int
+    strategy: str = "default"
 
 
 @dataclass(slots=True)
 class LedgerEntry:
-    strategy: str = "default"
     timestamp: int
     type: str        # fee / realized_pnl / funding
     amount: float
@@ -118,3 +117,4 @@ class LedgerEntry:
     ref: Optional[str]
     note: Optional[str]
     created_at: int
+    strategy: str = "default"
