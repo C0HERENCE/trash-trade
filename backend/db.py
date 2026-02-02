@@ -99,11 +99,12 @@ class Database:
     async def insert_trade(self, t: Trade) -> int:
         sql = """
         INSERT INTO trades (
-          symbol, position_id, side, trade_type, price, qty, notional,
+          strategy, symbol, position_id, side, trade_type, price, qty, notional,
           fee_amount, fee_rate, timestamp, reason, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
+            getattr(t, "strategy", "default"),
             t.symbol,
             t.position_id,
             t.side,
@@ -126,12 +127,13 @@ class Database:
         if p.position_id is None:
             sql = """
             INSERT INTO positions (
-              symbol, side, qty, entry_price, entry_time, leverage, margin,
+              strategy, symbol, side, qty, entry_price, entry_time, leverage, margin,
               stop_price, tp1_price, tp2_price, status, realized_pnl, fees_total,
               liq_price, close_time, close_reason, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
             """
             params = (
+                getattr(p, "strategy", "default"),
                 p.symbol,
                 p.side,
                 p.qty,
@@ -156,12 +158,13 @@ class Database:
 
         sql = """
         UPDATE positions SET
-          symbol=?, side=?, qty=?, entry_price=?, entry_time=?, leverage=?, margin=?,
+          strategy=?, symbol=?, side=?, qty=?, entry_price=?, entry_time=?, leverage=?, margin=?,
           stop_price=?, tp1_price=?, tp2_price=?, status=?, realized_pnl=?, fees_total=?,
           liq_price=?, updated_at=?
         WHERE position_id=?
         """
         params = (
+            getattr(p, "strategy", "default"),
             p.symbol,
             p.side,
             p.qty,
@@ -185,10 +188,11 @@ class Database:
     async def close_position(self, p: PositionClose) -> None:
         sql = """
         UPDATE positions SET
-          status=?, realized_pnl=?, fees_total=?, liq_price=?, close_time=?, close_reason=?, updated_at=?
+          strategy=?, status=?, realized_pnl=?, fees_total=?, liq_price=?, close_time=?, close_reason=?, updated_at=?
         WHERE position_id=?
         """
         params = (
+            getattr(p, "strategy", "default"),
             p.status,
             p.realized_pnl,
             p.fees_total,
@@ -200,21 +204,34 @@ class Database:
         )
         await self.execute(sql, params)
 
-    async def get_open_position(self, symbol: Optional[str] = None) -> Optional[aiosqlite.Row]:
+    async def get_open_position(
+        self, symbol: Optional[str] = None, strategy: Optional[str] = None
+    ) -> Optional[aiosqlite.Row]:
         sql = "SELECT * FROM positions WHERE status='OPEN'"
         params: List[Any] = []
         if symbol:
             sql += " AND symbol=?"
             params.append(symbol)
+        if strategy:
+            sql += " AND strategy=?"
+            params.append(strategy)
         sql += " ORDER BY entry_time DESC LIMIT 1"
         return await self.fetchone(sql, params)
 
     async def insert_equity_snapshot(self, s: EquitySnapshot) -> int:
         sql = """
-        INSERT INTO equity_snapshots (timestamp, balance, equity, upl, margin_used, free_margin)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO equity_snapshots (strategy, timestamp, balance, equity, upl, margin_used, free_margin)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        params = (s.timestamp, s.balance, s.equity, s.upl, s.margin_used, s.free_margin)
+        params = (
+            getattr(s, "strategy", "default"),
+            s.timestamp,
+            s.balance,
+            s.equity,
+            s.upl,
+            s.margin_used,
+            s.free_margin,
+        )
         await self.connect()
         cursor = await self._conn.execute(sql, params)
         await self._conn.commit()
@@ -222,10 +239,18 @@ class Database:
 
     async def insert_alert(self, a: Alert) -> int:
         sql = """
-        INSERT INTO alerts (timestamp, channel, level, message, dedup_key, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO alerts (strategy, timestamp, channel, level, message, dedup_key, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """
-        params = (a.timestamp, a.channel, a.level, a.message, a.dedup_key, a.created_at)
+        params = (
+            getattr(a, "strategy", "default"),
+            a.timestamp,
+            a.channel,
+            a.level,
+            a.message,
+            a.dedup_key,
+            a.created_at,
+        )
         await self.connect()
         cursor = await self._conn.execute(sql, params)
         await self._conn.commit()
@@ -296,10 +321,11 @@ class Database:
 
     async def insert_ledger(self, l: LedgerEntry) -> int:
         sql = """
-        INSERT INTO ledger (timestamp, type, amount, currency, symbol, ref, note, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO ledger (strategy, timestamp, type, amount, currency, symbol, ref, note, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """
         params = (
+            getattr(l, "strategy", "default"),
             l.timestamp,
             l.type,
             l.amount,
