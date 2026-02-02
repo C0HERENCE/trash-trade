@@ -251,7 +251,7 @@ async def get_stats() -> Dict[str, Any]:
     roi = (equity - initial) / initial if initial > 0 else 0.0
 
     def rate(x: int) -> float:
-        return (x / closed) if closed > 0 else 0.0
+        return (x / closed) if closed > 0 and x > 0 else 0.0
 
     return {
         "closed_positions": closed,
