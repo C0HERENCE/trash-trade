@@ -17,4 +17,15 @@ if [ ! -f configs/config.yaml ]; then
   cp configs/config.example.yaml configs/config.yaml
 fi
 
+# Build frontend
+echo "Building frontend..."
+cd "frontend"
+set +e  # 暂时关闭错误立即退出
+npm install && npm run build
+if [ $? -ne 0 ]; then
+  echo "Frontend build failed. Continuing with backend startup."
+fi
+set -e  # 重新启用错误立即退出
+cd ".."
+
 uvicorn backend.main:app --host 0.0.0.0 --port 8000

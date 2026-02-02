@@ -34,7 +34,14 @@ trash-trade/
       default.test.yaml
       dual_ma_test.ma_cross.yaml
   frontend/
-    index.html             # 简单仪表盘（原生 HTML/CSS/JS）
+    src/                   # Vue 3 源代码
+      components/          # Vue 组件
+      App.vue              # 主应用组件
+      main.js              # 应用入口
+    public/                # 静态资源
+    dist/                  # 构建输出目录
+    package.json           # 前端依赖配置
+    vite.config.js         # Vite 构建配置
   schema.sql               # SQLite schema
   scripts/
     quickstart.ps1         # Windows 一键启动
@@ -174,6 +181,8 @@ strategies:
 ### 依赖（建议）
 - Python 3.10+
 - pip
+- Node.js 16+（用于前端构建）
+- npm
 
 ### Python 包（requirements.txt）
 - fastapi
@@ -202,7 +211,11 @@ strategies:
 http://localhost:8000
 ```
 
-前端将通过 WebSocket `/ws/stream` 接收 15m K 线、指标与信号，并使用 TradingView Lightweight Charts 渲染。
+前端已使用 Vue 3 + Vite 重构，将通过 WebSocket `/ws/stream` 接收 15m K 线、指标与信号，并使用 TradingView Lightweight Charts 渲染。
+
+### 前端开发
+- 开发模式：`cd frontend && npm run dev`
+- 构建：`cd frontend && npm run build`
 
 ### 2) Ubuntu/Linux
 

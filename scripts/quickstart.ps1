@@ -18,5 +18,18 @@ if (-not (Test-Path "configs\config.yaml")) {
   Copy-Item "configs\config.example.yaml" "configs\config.yaml"
 }
 
+# Build frontend
+Write-Host "Building frontend..."
+Set-Location "frontend"
+try {
+  npm install
+  npm run build
+} catch {
+  Write-Warning "Frontend build failed. Continuing with backend startup."
+}
+finally {
+  Set-Location ".."
+}
+
 Write-Host "Starting FastAPI server + runtime..."
 python -m uvicorn backend.main:app --host 0.0.0.0 --port 8000

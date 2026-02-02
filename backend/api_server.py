@@ -14,6 +14,7 @@ import yaml
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from .config import load_settings
 from .db import Database
@@ -131,6 +132,11 @@ class StreamStore:
 
 settings = load_settings()
 app = FastAPI(title="trash-trade", root_path=settings.api.base_path or "")
+
+# 挂载前端静态文件（注意：必须在所有API路由定义之后挂载）
+# 这里我们使用根路径挂载，但是由于FastAPI的路由匹配优先级，API路由会优先匹配
+# 只有当没有匹配的API路由时，才会尝试匹配静态文件
+
 _strategy_ids = [s.id for s in settings.strategies]
 DEFAULT_STRATEGY = "default" if "default" in _strategy_ids else (_strategy_ids[0] if _strategy_ids else "default")
 
@@ -577,11 +583,5 @@ async def ws_stream(websocket: WebSocket) -> None:
         ws_stream_clients = max(0, ws_stream_clients - 1)
 
 
-@app.get("/")
-async def root() -> HTMLResponse:
-    html_path = "frontend/index.html"
-    try:
-        with open(html_path, "r", encoding="utf-8") as f:
-            return HTMLResponse(f.read())
-    except FileNotFoundError:
-        return HTMLResponse("<h1>frontend not found</h1>")
+# 挂载前端静态文件（在所有API路由定义之后）
+app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")
