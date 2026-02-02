@@ -129,7 +129,8 @@ class StreamStore:
 
 settings = load_settings()
 app = FastAPI(title="trash-trade", root_path=settings.api.base_path or "")
-DEFAULT_STRATEGY = settings.strategies[0].id if settings.strategies else "test"
+_strategy_ids = [s.id for s in settings.strategies]
+DEFAULT_STRATEGY = "default" if "default" in _strategy_ids else (_strategy_ids[0] if _strategy_ids else "default")
 
 # Hooks injected from main/runtime
 runtime_state_provider = None  # callable returning dict

@@ -255,6 +255,11 @@ class RuntimeEngine:
                 "SELECT balance, equity, upl, margin_used, free_margin FROM equity_snapshots WHERE strategy=? ORDER BY timestamp DESC LIMIT 1",
                 (sid,),
             )
+            if row is None and sid != "default":
+                # Backward-compat fallback for pre-multi-strategy rows.
+                row = await self._db.fetchone(
+                    "SELECT balance, equity, upl, margin_used, free_margin FROM equity_snapshots WHERE strategy='default' ORDER BY timestamp DESC LIMIT 1"
+                )
             if row is not None:
                 self._accounts[sid] = AccountState(
                     balance=float(row["balance"]),
@@ -267,6 +272,9 @@ class RuntimeEngine:
     async def _load_open_positions(self) -> None:
         for sid in self._strategies.keys():
             row = await self._db.get_open_position(self._settings.binance.symbol, strategy=sid)
+            if row is None and sid != "default":
+                # Backward-compat fallback for pre-multi-strategy rows.
+                row = await self._db.get_open_position(self._settings.binance.symbol, strategy="default")
             if row is None:
                 self._positions[sid] = None
                 self._cooldowns[sid] = 0

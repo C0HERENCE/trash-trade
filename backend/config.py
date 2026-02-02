@@ -78,7 +78,7 @@ class StrategyConfig(BaseModel):
 
 
 class StrategyEntryConfig(BaseModel):
-    id: str = "test"
+    id: str = "default"
     type: str = "test"  # test | ma_cross
     initial_capital: Optional[float] = None
     params: Dict[str, Any] = Field(default_factory=dict)
