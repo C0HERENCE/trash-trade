@@ -446,6 +446,21 @@ async def get_indicator_history(
     return {"items": series}
 
 
+@app.get("/api/equity_snapshots")
+async def get_equity_snapshots(
+    limit: int = Query(200, ge=1, le=2000),
+    strategy: Optional[str] = Query(None),
+) -> Dict[str, Any]:
+    db = await _db()
+    rows = await db.fetchall(
+        "SELECT * FROM equity_snapshots WHERE strategy=? ORDER BY timestamp DESC LIMIT ?",
+        (strategy or DEFAULT_STRATEGY, limit),
+    )
+    await db.close()
+    items = [dict(r) for r in reversed(rows)]
+    return {"items": items}
+
+
 @app.get("/api/debug/state")
 async def debug_state(alert: bool = False) -> Dict[str, Any]:
     # Gather runtime state if provided

@@ -93,6 +93,12 @@
       color: var(--muted);
       margin: 0 0 8px;
     }
+    .sparkline {
+      width: 100%;
+      height: 46px;
+      display: block;
+      margin-top: 8px;
+    }
     .stat {
       font-size: 22px;
       font-weight: 600;
@@ -201,6 +207,7 @@
         <div class="row"><span>浮动盈亏</span><span class="value" id="upl">--</span></div>
         <div class="row"><span>已用保证金</span><span class="value" id="margin">--</span></div>
         <div class="row"><span>可用保证金</span><span class="value" id="free_margin">--</span></div>
+        <canvas id="equity_spark" class="sparkline" height="46"></canvas>
       </div>
       <div class="card">
         <h2>仓位</h2>
@@ -514,6 +521,39 @@
       el('stat_stop').textContent = (s.stop_rate * 100).toFixed(2) + '%';
     }
 
+    async function loadEquitySpark() {
+      const res = await fetch(withStrategy(api('/api/equity_snapshots?limit=200')));
+      const data = await res.json();
+      const items = data.items || [];
+      const values = items.map(i => Number(i.equity)).filter(v => !Number.isNaN(v));
+      const canvas = el('equity_spark');
+      if (!canvas || values.length < 2) return;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.clientWidth || canvas.width;
+      const h = canvas.height;
+      canvas.width = w;
+      ctx.clearRect(0, 0, w, h);
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const range = (max - min) || 1;
+      ctx.beginPath();
+      values.forEach((v, idx) => {
+        const x = (idx / (values.length - 1)) * (w - 2) + 1;
+        const y = h - 2 - ((v - min) / range) * (h - 4);
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = '#5cc8ff';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      // baseline
+      ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+      ctx.beginPath();
+      ctx.moveTo(0, h - 1);
+      ctx.lineTo(w, h - 1);
+      ctx.stroke();
+    }
+
     async function loadStrategies() {
       const res = await fetch(api('/api/strategies'));
       const data = await res.json();
@@ -719,6 +759,7 @@
       tradesPage = 0;
       ledgerPage = 0;
       await loadStatus();
+      await loadEquitySpark();
       await loadTrades();
       await loadLedger();
       await loadStats();
@@ -730,6 +771,7 @@
 
     loadStrategies().then(async () => {
       await loadStatus();
+      await loadEquitySpark();
       await loadTrades();
       await loadLedger();
       await loadStats();
