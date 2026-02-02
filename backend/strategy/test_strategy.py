@@ -1,117 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, Protocol, runtime_checkable
-
-
-@dataclass(slots=True)
-class Indicators15m:
-    ema20: float
-    ema60: float
-    rsi14: float
-    macd_hist: float
-
-
-@dataclass(slots=True)
-class Indicators1h:
-    ema20: float
-    ema60: float
-    rsi14: float
-    close: float
-
-
-@dataclass(slots=True)
-class PositionState:
-    side: str  # LONG/SHORT
-    entry_price: float
-    qty: float
-    stop_price: float
-    tp1_price: float
-    tp2_price: float
-    tp1_hit: bool
-
-
-@dataclass(slots=True)
-class StrategyContext:
-    # latest prices
-    price: float
-    close_15m: float
-    low_15m: float
-    high_15m: float
-
-    # indicators
-    ind_15m: Indicators15m
-    ind_1h: Indicators1h
-
-    # history for cross/sequence checks
-    prev_rsi_15m: float
-    prev_macd_hist_15m: float
-    prev2_macd_hist_15m: float
-
-    # volatility / structure
-    atr14: float
-    structure_stop: Optional[float]
-
-    # position + cooldown
-    position: Optional[PositionState]
-    cooldown_bars_remaining: int
-
-    # params
-    trend_strength_min: float
-    atr_stop_mult: float
-    cooldown_after_stop: int
-    rsi_long_lower: float
-    rsi_long_upper: float
-    rsi_short_upper: float
-    rsi_short_lower: float
-    rsi_slope_required: bool
-
-
-@dataclass(slots=True)
-class EntrySignal:
-    side: str  # LONG/SHORT
-    entry_price: float
-    stop_price: float
-    tp1_price: float
-    tp2_price: float
-    reason: str
-
-
-@dataclass(slots=True)
-class ExitAction:
-    action: str  # STOP/TP1/TP2/CLOSE_ALL
-    price: float
-    reason: str
-
-
-@runtime_checkable
-class IStrategy(Protocol):
-    """Strategy interface to allow multiple strategies to plug into runtime."""
-
-    id: str
-
-    def on_bar_close(self, ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
-        ...
-
-    def on_tick(self, ctx: StrategyContext, price: float) -> Optional[ExitAction]:
-        ...
-
-    def on_state_restore(self, ctx: StrategyContext) -> None:
-        ...
-
-
-def _trend_filter_long(ind_1h: Indicators1h, trend_strength_min: float) -> bool:
-    if not (ind_1h.close > ind_1h.ema60 and ind_1h.ema20 > ind_1h.ema60 and ind_1h.rsi14 > 50):
-        return False
-    strength = abs(ind_1h.ema20 - ind_1h.ema60) / ind_1h.close
-    return strength >= trend_strength_min
-
-
-def _trend_filter_short(ind_1h: Indicators1h, trend_strength_min: float) -> bool:
-    if not (ind_1h.close < ind_1h.ema60 and ind_1h.ema20 < ind_1h.ema60 and ind_1h.rsi14 < 50):
-        return False
-    strength = abs(ind_1h.ema20 - ind_1h.ema60) / ind_1h.close
-    return strength >= trend_strength_min
+from .interfaces import (
+    EntrySignal,
+    ExitAction,
+    IStrategy,
+    Indicators15m,
+    Indicators1h,
+    PositionState,
+    StrategyContext,
+)
 
 
 def _rsi_cross_up(prev_rsi: float, rsi: float, level: float = 50.0) -> bool:
@@ -130,19 +27,31 @@ def _macd_hist_decreasing(prev2: float, prev1: float, curr: float) -> bool:
     return prev2 > prev1 > curr
 
 
-def _choose_stop_long(entry: float, atr: float, structure_stop: Optional[float], atr_mult: float) -> float:
+def _trend_filter_long(ind_1h: Indicators1h, trend_strength_min: float) -> bool:
+    if not (ind_1h.close > ind_1h.ema60 and ind_1h.ema20 > ind_1h.ema60 and ind_1h.rsi14 > 50):
+        return False
+    strength = abs(ind_1h.ema20 - ind_1h.ema60) / ind_1h.close
+    return strength >= trend_strength_min
+
+
+def _trend_filter_short(ind_1h: Indicators1h, trend_strength_min: float) -> bool:
+    if not (ind_1h.close < ind_1h.ema60 and ind_1h.ema20 < ind_1h.ema60 and ind_1h.rsi14 < 50):
+        return False
+    strength = abs(ind_1h.ema20 - ind_1h.ema60) / ind_1h.close
+    return strength >= trend_strength_min
+
+
+def _choose_stop_long(entry: float, atr: float, structure_stop: float | None, atr_mult: float) -> float:
     atr_stop = entry - atr_mult * atr
     if structure_stop is None:
         return atr_stop
-    # wider for long = lower price
     return min(structure_stop, atr_stop)
 
 
-def _choose_stop_short(entry: float, atr: float, structure_stop: Optional[float], atr_mult: float) -> float:
+def _choose_stop_short(entry: float, atr: float, structure_stop: float | None, atr_mult: float) -> float:
     atr_stop = entry + atr_mult * atr
     if structure_stop is None:
         return atr_stop
-    # wider for short = higher price
     return max(structure_stop, atr_stop)
 
 
@@ -153,23 +62,23 @@ def _calc_targets(entry: float, stop: float) -> tuple[float, float]:
     return tp1, tp2
 
 
-class BaseStrategy(IStrategy):
-    """Current single-strategy implementation, now conforming to IStrategy."""
+class TestStrategy(IStrategy):
+    """Existing strategy implementation, renamed and movable."""
 
-    id: str = "default"
+    id: str = "test"
 
     def on_state_restore(self, ctx: StrategyContext) -> None:
-        # nothing extra to restore for stateless logic; placeholder for future
+        # Placeholder for restoring per-strategy state if needed
         return
 
-    def on_bar_close(self, ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
+    def on_bar_close(self, ctx: StrategyContext) -> EntrySignal | ExitAction | None:
         return _on_15m_close(ctx)
 
-    def on_tick(self, ctx: StrategyContext, price: float) -> Optional[ExitAction]:
+    def on_tick(self, ctx: StrategyContext, price: float) -> ExitAction | None:
         return _on_realtime_update(ctx, price)
 
 
-def _on_15m_close(ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
+def _on_15m_close(ctx: StrategyContext) -> EntrySignal | ExitAction | None:
     # If position open, evaluate trend-failure exit on close
     if ctx.position is not None:
         pos = ctx.position
@@ -237,7 +146,7 @@ def _on_15m_close(ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
     return None
 
 
-def _on_realtime_update(ctx: StrategyContext, price: float) -> Optional[ExitAction]:
+def _on_realtime_update(ctx: StrategyContext, price: float) -> ExitAction | None:
     pos = ctx.position
     if pos is None:
         return None
@@ -258,3 +167,4 @@ def _on_realtime_update(ctx: StrategyContext, price: float) -> Optional[ExitActi
             return ExitAction(action="TP2", price=pos.tp2_price, reason="tp2")
 
     return None
+

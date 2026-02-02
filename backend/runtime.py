@@ -27,8 +27,7 @@ from .strategy import (
     Indicators1h,
     PositionState,
     StrategyContext,
-    on_15m_close,
-    on_realtime_update,
+    TestStrategy,
 )
 
 
@@ -56,6 +55,7 @@ class RuntimeEngine:
         self._indicators: Optional[IndicatorEngine] = None
         self._ws: Optional[BinanceWsClient] = None
 
+        self._strategy = TestStrategy()
         self._position: Optional[PositionState] = None
         self._cooldown_bars = 0
         self._account = AccountState(
