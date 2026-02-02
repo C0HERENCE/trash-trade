@@ -1,6 +1,6 @@
 # trash-trade
 
-BTCUSDT（USDT-M 永续）模拟交易系统，基于 Binance 公共 REST + WebSocket 行情，支持历史 warmup、SQLite 持久化、指标增量更新、策略决策、告警与 API 展示。
+BTCUSDT（USDT-M 永续）模拟交易系统，基于 Binance 公共 REST + WebSocket 行情，支持历史 warmup、SQLite 持久化、指标增量更新、策略决策、告警与 API 展示。支持**多策略并行运行**（每个策略独立模拟资金、独立持仓、独立流水）。
 
 > 当前版本包含完整主循环（warmup + WS + 指标 + 策略 + 模拟撮合 + API）。可直接运行观察模拟结果。
 
@@ -13,7 +13,11 @@ trash-trade/
   backend/
     api_server.py          # FastAPI REST + WebSocket 状态推送
     main.py                # 运行入口（启动主循环 + API）
-    runtime.py             # 主循环编排（warmup/WS/指标/策略/撮合/状态）
+    runtime.py             # 主循环编排（warmup/WS/指标/多策略广播/撮合/状态）
+    strategy/
+      interfaces.py        # IStrategy 接口与上下文模型
+      test_strategy.py     # 默认测试策略（test）
+      ma_cross_strategy.py # 简单双均线策略（ma_cross）
     alerts.py              # 告警统一入口（Telegram/Bark/WeCom）
     config.py              # 配置加载（YAML + 环境变量覆盖）
     db.py                  # SQLite DAO 层（aiosqlite）
@@ -25,7 +29,10 @@ trash-trade/
       ws.py                # Binance WS kline stream
     static/
   configs/
-    config.example.yaml    # 示例配置
+    config.example.yaml    # 全局配置（共享基础设施 + 策略列表）
+    strategies/
+      default.test.yaml
+      dual_ma_test.ma_cross.yaml
   frontend/
     index.html             # 简单仪表盘（原生 HTML/CSS/JS）
   schema.sql               # SQLite schema
@@ -83,37 +90,41 @@ trash-trade/
   - 空：收盘 > EMA20 且 RSI > 50 -> 平剩余（可能早于止损价离场）
   - 解释：当短周期动量明显与持仓方向相反时，直接在下一根收盘价离场，不等待原止损价触发，以降低回撤。
 
+### 多策略并行（当前实现）
+- 支持在同一个 Runtime 里同时运行多个策略实例（如 `default(test)` + `dual_ma_test(ma_cross)`）
+- 每个策略独立：
+  - 模拟资金（`sim.initial_capital`）
+  - 杠杆/手续费/风险参数
+  - 持仓与冷却
+  - trades / positions / ledger / equity_snapshots（按 `strategy` 字段隔离）
+
 ---
 
-## 配置参数说明（configs/config.example.yaml）
+## 配置参数说明（已拆分）
 
-### 核心参数
-- `binance.rest_base` / `binance.ws_base`：行情端点
-- `binance.symbol`：交易对（默认 BTCUSDT）
-- `binance.intervals`：订阅周期（默认 15m/1h）
-- `sim.initial_capital`：初始资金（1000）
-- `sim.max_leverage`：最大杠杆（20）
-- `sim.fee_rate`：手续费率（0.0004）
+### 1) 全局配置：`configs/config.yaml`
+建议只保留共享内容：
+- `app` / `binance` / `kline_cache` / `alerts` / `storage` / `api` / `frontend`
+- `strategies`：策略实例列表（id/type/config_path）
 
-### 指标参数
-- `indicators.ema_trend.fast/slow`：EMA20/EMA60
-- `indicators.rsi.length`
-- `indicators.macd.fast/slow/signal`
-- `indicators.atr.length`
+示例：
+```yaml
+strategies:
+  - id: default
+    type: test
+    config_path: "./configs/strategies/default.test.yaml"
+  - id: dual_ma_test
+    type: ma_cross
+    config_path: "./configs/strategies/dual_ma_test.ma_cross.yaml"
+```
 
-### 策略参数
-- `strategy.trend_strength_min`
-- `strategy.atr_stop_mult`
-- `strategy.cooldown_after_stop`
-- `strategy.rsi_long_lower` / `rsi_long_upper`（默认 50–60，避免过度超买追多）
-- `strategy.rsi_short_lower` / `rsi_short_upper`（默认 40–50，避免过度超卖追空）
-- `strategy.rsi_slope_required`（是否要求 RSI 斜率同向，斜率=当前 RSI - 上一根 RSI）
+### 2) 策略独立配置：`configs/strategies/*.yaml`
+策略相关参数全部放到这里（每个策略单独一份）：
+- `sim`：`initial_capital` / `max_leverage` / `fee_rate` / `slippage`
+- `risk`：`max_position_notional` / `max_position_pct_equity` / `mmr_tiers`
+- `strategy`：`trend_strength_min` / `atr_stop_mult` / `cooldown_after_stop` / `rsi_*`
 
-### 风险/冷却
-- `risk.max_position_notional`
-- `risk.max_position_pct_equity`
-- `risk.mmr_tiers`：维持保证金阶梯（notional_usdt / mmr / maint_amount），用于计算近似爆仓价（示例使用 Binance BTCUSDT 125x 档位，首档从 300k 开始；如有官方变更请在配置中调整）
-- `risk.liquidation_buffer_pct`：默认 0，已被 mmr_tiers 取代
+> 兼容说明：全局 `sim/risk/strategy` 仍可作为默认兜底；若策略文件提供同名参数，则以策略文件为准。
 
 ### warmup 与缓存
 - `kline_cache.max_bars_15m / max_bars_1h`：环形缓冲上限
@@ -129,10 +140,13 @@ trash-trade/
 - `api.host / api.port`：服务地址
 - `GET /api/debug/state`：返回运行状态，可用 `?alert=true` 将状态发送到告警渠道
 - `GET /api/ledger`：流水（手续费/平仓盈亏/资金费率）
+- `GET /api/strategies`：返回可用策略列表与默认策略
+- `GET /api/status|trades|positions|ledger|stats`：支持 `?strategy=...` 过滤
 
 ### 实时推送
 - `/ws/status`：账户与仓位状态
 - `/ws/stream`：15m K 线、实时指标（含斜率、条件预览）、信号事件（二进制 msgpack+zlib）
+- 两个 WS 都支持 `?strategy=...`，前端可按策略订阅独立数据流
 - 推送频率：`api.ws_push_interval`（`"raw"`=每次更新；或填秒数如 5/10/15）
 - 若通过子路径反向代理（如 `/app/trash-trade`），设置 `api.base_path=/app/trash-trade`，前端会自动按当前路径访问 API/WS。
 
@@ -147,10 +161,10 @@ trash-trade/
    - `x=false`：更新实时 bar（用于止盈止损）
    - `x=true`：写入 DB + 推入 deque + 触发回调
 5. **指标引擎**：实时更新（x=false 时用 preview 计算）；收盘时落盘
-6. **策略决策**：
-   - `on_15m_close`：入场/趋势失败出场
-   - `on_realtime_update`：止盈止损/条件预览（随实时指标变化）
-7. **模拟撮合**：更新仓位/余额/手续费/快照
+6. **策略决策（多策略广播）**：
+   - 每个 15m 收盘：逐个策略调用 `on_bar_close`
+   - 每次实时更新：逐个策略调用 `on_tick`
+7. **模拟撮合（按策略隔离）**：每个策略独立更新仓位/余额/手续费/快照
 8. **API 与前端**：提供状态/历史查询与实时推送（WS 推送 K 线/实时指标/条件、信号）
 
 ---
@@ -226,6 +240,8 @@ docker compose up --build
 ```
 cp configs/config.example.yaml configs/config.yaml
 ```
+
+并按需创建/修改策略配置文件（如 `configs/strategies/default.test.yaml`、`configs/strategies/dual_ma_test.ma_cross.yaml`）。
 
 2. 如需告警，配置 token/webhook：
 ```
