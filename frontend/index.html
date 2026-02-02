@@ -140,6 +140,10 @@
       cursor: pointer;
       font-size: 12px;
     }
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
     .btn:hover {
       border-color: #3a4155;
     }
@@ -379,6 +383,7 @@
     }
 
     let tradesPage = 0;
+    let tradesHasMore = true;
     const tradesPageSize = 20;
     async function loadTrades() {
       const offset = tradesPage * tradesPageSize;
@@ -399,6 +404,8 @@
       }).join('');
       el('trades_body').innerHTML = rows;
       el('page_trades').textContent = (tradesPage + 1);
+      tradesHasMore = (data.items || []).length === tradesPageSize;
+      updateTradeButtons();
     }
 
     async function loadHistory() {
@@ -438,6 +445,7 @@
     }
 
     let ledgerPage = 0;
+    let ledgerHasMore = true;
     const ledgerPageSize = 20;
     async function loadLedger() {
       const offset = ledgerPage * ledgerPageSize;
@@ -456,6 +464,18 @@
       }).join('');
       el('ledger_body').innerHTML = rows;
       el('page_ledger').textContent = (ledgerPage + 1);
+      ledgerHasMore = (data.items || []).length === ledgerPageSize;
+      updateLedgerButtons();
+    }
+
+    function updateTradeButtons() {
+      el('prev_trades').disabled = tradesPage <= 0;
+      el('next_trades').disabled = !tradesHasMore;
+    }
+
+    function updateLedgerButtons() {
+      el('prev_ledger').disabled = ledgerPage <= 0;
+      el('next_ledger').disabled = !ledgerHasMore;
     }
 
     async function loadStats() {
@@ -623,10 +643,10 @@
 
     el('refresh_trades').addEventListener('click', loadTrades);
     el('refresh_ledger').addEventListener('click', loadLedger);
-    el('prev_trades').addEventListener('click', () => { tradesPage = Math.max(0, tradesPage - 1); loadTrades(); });
-    el('next_trades').addEventListener('click', () => { tradesPage += 1; loadTrades(); });
-    el('prev_ledger').addEventListener('click', () => { ledgerPage = Math.max(0, ledgerPage - 1); loadLedger(); });
-    el('next_ledger').addEventListener('click', () => { ledgerPage += 1; loadLedger(); });
+    el('prev_trades').addEventListener('click', () => { if (tradesPage > 0) { tradesPage -= 1; loadTrades(); }});
+    el('next_trades').addEventListener('click', () => { if (tradesHasMore) { tradesPage += 1; loadTrades(); }});
+    el('prev_ledger').addEventListener('click', () => { if (ledgerPage > 0) { ledgerPage -= 1; loadLedger(); }});
+    el('next_ledger').addEventListener('click', () => { if (ledgerHasMore) { ledgerPage += 1; loadLedger(); }});
     el('ws_connect').addEventListener('click', () => {
       stopStreams();
       initWs();
