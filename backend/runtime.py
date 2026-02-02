@@ -5,7 +5,7 @@ import logging
 import httpx
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Dict, Any, Iterable
 
 from .alerts import AlertManager
 from .config import Settings
@@ -28,6 +28,8 @@ from .strategy import (
     PositionState,
     StrategyContext,
     TestStrategy,
+    MaCrossStrategy,
+    IStrategy,
 )
 
 
@@ -55,31 +57,53 @@ class RuntimeEngine:
         self._indicators: Optional[IndicatorEngine] = None
         self._ws: Optional[BinanceWsClient] = None
 
-        self._strategy = TestStrategy()
-        self._position: Optional[PositionState] = None
-        self._cooldown_bars = 0
-        self._account = AccountState(
-            balance=settings.sim.initial_capital,
-            equity=settings.sim.initial_capital,
-            upl=0.0,
-            margin_used=0.0,
-            free_margin=settings.sim.initial_capital,
-        )
+        # multi-strategy containers
+        self._strategies: dict[str, IStrategy] = {}
+        self._positions: dict[str, Optional[PositionState]] = {}
+        self._cooldowns: dict[str, int] = {}
+        self._accounts: dict[str, AccountState] = {}
 
-        self._last_rsi_15m: Optional[float] = None
-        self._prev_macd_hist_15m: Optional[float] = None
-        self._prev2_macd_hist_15m: Optional[float] = None
+        self._last_rsi_15m: dict[str, Optional[float]] = {}
+        self._prev_macd_hist_15m: dict[str, Optional[float]] = {}
+        self._prev2_macd_hist_15m: dict[str, Optional[float]] = {}
         self._ind_1h: Optional[Indicators1h] = None
 
         self._last_price: float = 0.0
         self._ws_task: Optional[asyncio.Task] = None
         self._funding_task: Optional[asyncio.Task] = None
 
+    # ---------------------- init helpers ----------------------
+
+    def _init_strategies(self) -> None:
+        # build strategies from config
+        for s in self._settings.strategies:
+            strat: IStrategy
+            if s.type == "ma_cross":
+                strat = MaCrossStrategy()
+            else:
+                strat = TestStrategy()
+            strat.id = s.id
+            self._strategies[s.id] = strat
+            init_cap = s.initial_capital or self._settings.sim.initial_capital
+            self._accounts[s.id] = AccountState(
+                balance=init_cap,
+                equity=init_cap,
+                upl=0.0,
+                margin_used=0.0,
+                free_margin=init_cap,
+            )
+            self._positions[s.id] = None
+            self._cooldowns[s.id] = 0
+            self._last_rsi_15m[s.id] = None
+            self._prev_macd_hist_15m[s.id] = None
+            self._prev2_macd_hist_15m[s.id] = None
+
     async def start(self) -> None:
         await self._db.connect()
         await self._db.init_schema()
+        self._init_strategies()
         await self._load_account_state()
-        await self._load_open_position()
+        await self._load_open_positions()
 
         bars_15m, bars_1h = self._compute_warmup_bars()
         maxlen_15m = max(self._settings.kline_cache.max_bars_15m, bars_15m)
@@ -147,7 +171,7 @@ class RuntimeEngine:
                         close=bar.close,
                     )
 
-        # Prime 15m indicators and history-dependent fields
+        # Prime 15m indicators and history-dependent fields for each strategy
         bars_15m = self._buffers.buffer("15m").to_list()
         last_bar_15m: Optional[KlineBar] = None
         last_snap_15m = None
@@ -158,15 +182,16 @@ class RuntimeEngine:
                 continue
             if snap.macd_hist is None or snap.atr14 is None:
                 continue
-            if self._last_rsi_15m is None:
-                self._last_rsi_15m = snap.rsi14
-                self._prev_macd_hist_15m = snap.macd_hist
-                self._prev2_macd_hist_15m = snap.macd_hist
-            else:
-                self._prev2_macd_hist_15m = self._prev_macd_hist_15m
-                self._prev_macd_hist_15m = snap.macd_hist
-                self._last_rsi_15m = snap.rsi14
             last_snap_15m = snap
+            for sid in self._strategies.keys():
+                if self._last_rsi_15m.get(sid) is None:
+                    self._last_rsi_15m[sid] = snap.rsi14
+                    self._prev_macd_hist_15m[sid] = snap.macd_hist
+                    self._prev2_macd_hist_15m[sid] = snap.macd_hist
+                else:
+                    self._prev2_macd_hist_15m[sid] = self._prev_macd_hist_15m[sid]
+                    self._prev_macd_hist_15m[sid] = snap.macd_hist
+                    self._last_rsi_15m[sid] = snap.rsi14
 
         # Push initial snapshots for frontend
         if last_bar_15m is not None:
@@ -192,18 +217,7 @@ class RuntimeEngine:
                     "atr14": last_snap_15m.atr14,
                 }
             )
-            conditions = self._compute_conditions(
-                bar=last_bar_15m,
-                ind_15m=Indicators15m(
-                    ema20=last_snap_15m.ema20,
-                    ema60=last_snap_15m.ema60,
-                    rsi14=last_snap_15m.rsi14,
-                    macd_hist=last_snap_15m.macd_hist,
-                ),
-            )
-            await self._stream_store.update_snapshot(
-                last_signal={"t": "cond", "c": conditions}
-            )
+            # conditions are emitted per-strategy on realtime/close callbacks
         if self._ind_1h is not None:
             await self._stream_store.update_snapshot(
                 indicators_1h={
@@ -235,33 +249,38 @@ class RuntimeEngine:
         return bars_15m, bars_1h
 
     async def _load_account_state(self) -> None:
-        row = await self._db.fetchone(
-            "SELECT * FROM equity_snapshots ORDER BY timestamp DESC LIMIT 1"
-        )
-        if row is not None:
-            self._account.balance = float(row["balance"])
-            self._account.equity = float(row["equity"])
-            self._account.upl = float(row["upl"])
-            self._account.margin_used = float(row["margin_used"])
-            self._account.free_margin = float(row["free_margin"])
+        # per-strategy latest equity snapshot
+        for sid, acc in self._accounts.items():
+            row = await self._db.fetchone(
+                "SELECT balance, equity, upl, margin_used, free_margin FROM equity_snapshots WHERE strategy=? ORDER BY timestamp DESC LIMIT 1",
+                (sid,),
+            )
+            if row is not None:
+                self._accounts[sid] = AccountState(
+                    balance=float(row["balance"]),
+                    equity=float(row["equity"]),
+                    upl=float(row["upl"]),
+                    margin_used=float(row["margin_used"]),
+                    free_margin=float(row["free_margin"]),
+                )
 
-    async def _load_open_position(self) -> None:
-        row = await self._db.get_open_position(self._settings.binance.symbol)
-        if row is None:
-            return
-        self._position = PositionState(
-            side=row["side"],
-            entry_price=float(row["entry_price"]),
-            qty=float(row["qty"]),
-            stop_price=float(row["stop_price"]) if row["stop_price"] is not None else 0.0,
-            tp1_price=float(row["tp1_price"]) if row["tp1_price"] is not None else 0.0,
-            tp2_price=float(row["tp2_price"]) if row["tp2_price"] is not None else 0.0,
-            tp1_hit=bool(
-                row["stop_price"] is not None
-                and row["entry_price"] is not None
-                and float(row["stop_price"]) == float(row["entry_price"])
-            ),
-        )
+    async def _load_open_positions(self) -> None:
+        for sid in self._strategies.keys():
+            row = await self._db.get_open_position(self._settings.binance.symbol, strategy=sid)
+            if row is None:
+                self._positions[sid] = None
+                self._cooldowns[sid] = 0
+                continue
+            self._positions[sid] = PositionState(
+                side=row["side"],
+                entry_price=float(row["entry_price"]),
+                qty=float(row["qty"]),
+                stop_price=float(row["stop_price"]) if row["stop_price"] is not None else 0.0,
+                tp1_price=float(row["tp1_price"]) if row["tp1_price"] is not None else 0.0,
+                tp2_price=float(row["tp2_price"]) if row["tp2_price"] is not None else 0.0,
+                tp1_hit=False,
+            )
+            self._cooldowns[sid] = 0
 
     async def _on_kline_update(self, interval: str, bar: KlineBar) -> None:
         if interval != "15m":
@@ -283,7 +302,6 @@ class RuntimeEngine:
     async def _on_kline_close(self, interval: str, bar: KlineBar) -> None:
         if self._indicators is None:
             return
-
         snapshot = self._indicators.update_on_close(interval, bar)
         if snapshot is None:
             return
@@ -305,20 +323,17 @@ class RuntimeEngine:
             )
             return
 
-        if interval != "15m":
+        if interval != "15m" or self._ind_1h is None:
             return
-        if self._ind_1h is None:
-            return
-
         if snapshot.macd_hist is None or snapshot.atr14 is None:
             return
 
-        if self._last_rsi_15m is None:
-            self._last_rsi_15m = snapshot.rsi14
-            self._prev_macd_hist_15m = snapshot.macd_hist
-            self._prev2_macd_hist_15m = snapshot.macd_hist
-            return
-
+        ind_15m = Indicators15m(
+            ema20=snapshot.ema20,
+            ema60=snapshot.ema60,
+            rsi14=snapshot.rsi14,
+            macd_hist=snapshot.macd_hist,
+        )
         await self._stream_store.update_snapshot(
             indicators_15m={
                 "ema20": snapshot.ema20,
@@ -329,63 +344,58 @@ class RuntimeEngine:
             }
         )
 
-        conditions = self._compute_conditions(
-            bar=bar,
-            ind_15m=Indicators15m(
-                ema20=snapshot.ema20,
-                ema60=snapshot.ema60,
-                rsi14=snapshot.rsi14,
-                macd_hist=snapshot.macd_hist,
-            ),
-        )
-        await self._stream_store.update_snapshot(last_signal={"t": "cond", "c": conditions})
+        for sid, strat in self._strategies.items():
+            prev_rsi = self._last_rsi_15m.get(sid)
+            prev_macd = self._prev_macd_hist_15m.get(sid)
+            prev2_macd = self._prev2_macd_hist_15m.get(sid)
+            if prev_rsi is None:
+                self._last_rsi_15m[sid] = snapshot.rsi14
+                self._prev_macd_hist_15m[sid] = snapshot.macd_hist
+                self._prev2_macd_hist_15m[sid] = snapshot.macd_hist
+                continue
 
-        ctx = StrategyContext(
-            price=bar.close,
-            close_15m=bar.close,
-            low_15m=bar.low,
-            high_15m=bar.high,
-            ind_15m=Indicators15m(
-                ema20=snapshot.ema20,
-                ema60=snapshot.ema60,
-                rsi14=snapshot.rsi14,
-                macd_hist=snapshot.macd_hist,
-            ),
-            ind_1h=self._ind_1h,
-            prev_rsi_15m=self._last_rsi_15m,
-            prev_macd_hist_15m=self._prev_macd_hist_15m or snapshot.macd_hist,
-            prev2_macd_hist_15m=self._prev2_macd_hist_15m or snapshot.macd_hist,
-            atr14=snapshot.atr14,
-            structure_stop=None,
-            position=self._position,
-            cooldown_bars_remaining=self._cooldown_bars,
-            trend_strength_min=self._settings.strategy.trend_strength_min,
-            atr_stop_mult=self._settings.strategy.atr_stop_mult,
-            cooldown_after_stop=self._settings.strategy.cooldown_after_stop,
-            rsi_long_lower=self._settings.strategy.rsi_long_lower,
-            rsi_long_upper=self._settings.strategy.rsi_long_upper,
-            rsi_short_upper=self._settings.strategy.rsi_short_upper,
-            rsi_short_lower=self._settings.strategy.rsi_short_lower,
-            rsi_slope_required=self._settings.strategy.rsi_slope_required,
-        )
+            conditions = self._compute_conditions(sid=sid, bar=bar, ind_15m=ind_15m)
+            await self._stream_store.update_snapshot(last_signal={"t": "cond", "sid": sid, "c": conditions})
 
-        signal = on_15m_close(ctx)
-        if isinstance(signal, EntrySignal):
-            await self._open_position(signal)
-        elif isinstance(signal, ExitAction):
-            await self._close_by_action(signal)
+            ctx = StrategyContext(
+                price=bar.close,
+                close_15m=bar.close,
+                low_15m=bar.low,
+                high_15m=bar.high,
+                ind_15m=ind_15m,
+                ind_1h=self._ind_1h,
+                prev_rsi_15m=prev_rsi,
+                prev_macd_hist_15m=prev_macd if prev_macd is not None else snapshot.macd_hist,
+                prev2_macd_hist_15m=prev2_macd if prev2_macd is not None else snapshot.macd_hist,
+                atr14=snapshot.atr14,
+                structure_stop=None,
+                position=self._positions.get(sid),
+                cooldown_bars_remaining=self._cooldowns.get(sid, 0),
+                trend_strength_min=self._settings.strategy.trend_strength_min,
+                atr_stop_mult=self._settings.strategy.atr_stop_mult,
+                cooldown_after_stop=self._settings.strategy.cooldown_after_stop,
+                rsi_long_lower=self._settings.strategy.rsi_long_lower,
+                rsi_long_upper=self._settings.strategy.rsi_long_upper,
+                rsi_short_upper=self._settings.strategy.rsi_short_upper,
+                rsi_short_lower=self._settings.strategy.rsi_short_lower,
+                rsi_slope_required=self._settings.strategy.rsi_slope_required,
+            )
+            signal = strat.on_bar_close(ctx)
+            if isinstance(signal, EntrySignal):
+                await self._open_position(sid, signal)
+            elif isinstance(signal, ExitAction):
+                await self._close_by_action(sid, signal)
 
-        self._last_rsi_15m = snapshot.rsi14
-        self._prev2_macd_hist_15m = self._prev_macd_hist_15m
-        self._prev_macd_hist_15m = snapshot.macd_hist
-
-        if self._cooldown_bars > 0:
-            self._cooldown_bars -= 1
+            self._last_rsi_15m[sid] = snapshot.rsi14
+            self._prev2_macd_hist_15m[sid] = self._prev_macd_hist_15m.get(sid)
+            self._prev_macd_hist_15m[sid] = snapshot.macd_hist
+            if self._cooldowns.get(sid, 0) > 0:
+                self._cooldowns[sid] = max(0, self._cooldowns[sid] - 1)
 
         await self._update_status(bar.close)
         await self._snapshot_equity()
 
-    def _compute_conditions(self, bar: KlineBar, ind_15m: Indicators15m) -> dict:
+    def _compute_conditions(self, sid: str, bar: KlineBar, ind_15m: Indicators15m) -> dict:
         def item(
             label: str,
             ok: bool,
@@ -401,13 +411,13 @@ class RuntimeEngine:
                 "long": [item("1h指标未就绪", False, info="等待1h收盘")],
                 "short": [item("1h指标未就绪", False, info="等待1h收盘")],
             }
-        if self._position is not None:
+        if self._positions.get(sid) is not None:
             return {
                 "long": [item("已有持仓", False)],
                 "short": [item("已有持仓", False)],
             }
-        if self._cooldown_bars > 0:
-            label = f"冷却中({self._cooldown_bars})"
+        if self._cooldowns.get(sid, 0) > 0:
+            label = f"冷却中({self._cooldowns.get(sid, 0)})"
             return {"long": [item(label, False)], "short": [item(label, False)]}
 
         cond_long = []
@@ -445,7 +455,7 @@ class RuntimeEngine:
         )
 
         # RSI 区间与斜率
-        prev_rsi = self._last_rsi_15m
+        prev_rsi = self._last_rsi_15m.get(sid)
         rsi_slope = ind_15m.rsi14 - prev_rsi if prev_rsi is not None else None
 
         rsi_long_ok = (
@@ -482,8 +492,8 @@ class RuntimeEngine:
             )
         )
 
-        prev1 = self._prev_macd_hist_15m
-        prev2 = self._prev2_macd_hist_15m
+        prev1 = self._prev_macd_hist_15m.get(sid)
+        prev2 = self._prev2_macd_hist_15m.get(sid)
         if prev1 is None or prev2 is None:
             cond_long.append(item("MACD柱连续上升", False, value=ind_15m.macd_hist, info="等待足够历史"))
             cond_short.append(item("MACD柱连续下降", False, value=ind_15m.macd_hist, info="等待足够历史"))
@@ -528,64 +538,58 @@ class RuntimeEngine:
         )
 
         ind1h = self._ind_1h or Indicators1h(ema20=0.0, ema60=0.0, rsi14=0.0, close=bar.close)
+        ind_15m = Indicators15m(
+            ema20=preview.ema20,
+            ema60=preview.ema60,
+            rsi14=preview.rsi14,
+            macd_hist=preview.macd_hist or 0.0,
+        )
 
-        ctx = StrategyContext(
-            price=bar.close,
-            close_15m=bar.close,
-            low_15m=bar.low,
-            high_15m=bar.high,
-            ind_15m=Indicators15m(
-                ema20=preview.ema20,
-                ema60=preview.ema60,
-                rsi14=preview.rsi14,
-                macd_hist=preview.macd_hist or 0.0,
-            ),
-            ind_1h=ind1h,
-            prev_rsi_15m=self._last_rsi_15m or preview.rsi14,
-            prev_macd_hist_15m=self._prev_macd_hist_15m or preview.macd_hist or 0.0,
-            prev2_macd_hist_15m=self._prev2_macd_hist_15m or preview.macd_hist or 0.0,
-            atr14=preview.atr14 or 0.0,
-            structure_stop=None,
-            position=self._position,
-            cooldown_bars_remaining=self._cooldown_bars,
-            trend_strength_min=self._settings.strategy.trend_strength_min,
-            atr_stop_mult=self._settings.strategy.atr_stop_mult,
-            cooldown_after_stop=self._settings.strategy.cooldown_after_stop,
-            rsi_long_lower=self._settings.strategy.rsi_long_lower,
-            rsi_long_upper=self._settings.strategy.rsi_long_upper,
-            rsi_short_upper=self._settings.strategy.rsi_short_upper,
-            rsi_short_lower=self._settings.strategy.rsi_short_lower,
-            rsi_slope_required=self._settings.strategy.rsi_slope_required,
-        )
-        # realtime conditions preview for frontend
-        conditions = self._compute_conditions(
-            bar=bar,
-            ind_15m=Indicators15m(
-                ema20=preview.ema20,
-                ema60=preview.ema60,
-                rsi14=preview.rsi14,
-                macd_hist=preview.macd_hist or 0.0,
-            ),
-        )
-        await self._stream_store.update_snapshot(last_signal={"t": "cond", "c": conditions})
-        action = on_realtime_update(ctx, bar.close)
-        if action is not None:
-            await self._close_by_action(action)
+        for sid, strat in self._strategies.items():
+            ctx = StrategyContext(
+                price=bar.close,
+                close_15m=bar.close,
+                low_15m=bar.low,
+                high_15m=bar.high,
+                ind_15m=ind_15m,
+                ind_1h=ind1h,
+                prev_rsi_15m=self._last_rsi_15m.get(sid) or preview.rsi14,
+                prev_macd_hist_15m=self._prev_macd_hist_15m.get(sid) or preview.macd_hist or 0.0,
+                prev2_macd_hist_15m=self._prev2_macd_hist_15m.get(sid) or preview.macd_hist or 0.0,
+                atr14=preview.atr14 or 0.0,
+                structure_stop=None,
+                position=self._positions.get(sid),
+                cooldown_bars_remaining=self._cooldowns.get(sid, 0),
+                trend_strength_min=self._settings.strategy.trend_strength_min,
+                atr_stop_mult=self._settings.strategy.atr_stop_mult,
+                cooldown_after_stop=self._settings.strategy.cooldown_after_stop,
+                rsi_long_lower=self._settings.strategy.rsi_long_lower,
+                rsi_long_upper=self._settings.strategy.rsi_long_upper,
+                rsi_short_upper=self._settings.strategy.rsi_short_upper,
+                rsi_short_lower=self._settings.strategy.rsi_short_lower,
+                rsi_slope_required=self._settings.strategy.rsi_slope_required,
+            )
+            conditions = self._compute_conditions(sid=sid, bar=bar, ind_15m=ind_15m)
+            await self._stream_store.update_snapshot(last_signal={"t": "cond", "sid": sid, "c": conditions})
+            action = strat.on_tick(ctx, bar.close)
+            if action is not None:
+                await self._close_by_action(sid, action)
         await self._update_status(bar.close)
         self._last_price = bar.close
 
-    async def _open_position(self, signal: EntrySignal) -> None:
-        if self._position is not None:
+    async def _open_position(self, sid: str, signal: EntrySignal) -> None:
+        if self._positions.get(sid) is not None:
             return
+        acc = self._accounts[sid]
         notional_cap = min(
             self._settings.risk.max_position_notional,
-            self._account.balance * self._settings.risk.max_position_pct_equity * self._settings.sim.max_leverage,
+            acc.balance * self._settings.risk.max_position_pct_equity * self._settings.sim.max_leverage,
         )
         qty = notional_cap / signal.entry_price
         notional = qty * signal.entry_price
         fee = notional * self._settings.sim.fee_rate
         margin = notional / self._settings.sim.max_leverage
-        self._account.balance -= fee
+        acc.balance -= fee
 
         pos = PositionState(
             side=signal.side,
@@ -596,11 +600,12 @@ class RuntimeEngine:
             tp2_price=signal.tp2_price,
             tp1_hit=False,
         )
-        self._position = pos
+        self._positions[sid] = pos
 
         now_ms = int(time.time() * 1000)
         pos_id = await self._db.upsert_position_open(
             PositionOpen(
+                strategy=sid,
                 symbol=self._settings.binance.symbol,
                 side=signal.side,
                 qty=qty,
@@ -614,7 +619,7 @@ class RuntimeEngine:
                 status="OPEN",
                 realized_pnl=0.0,
                 fees_total=fee,
-                liq_price=self._calc_liq_price(signal.entry_price, signal.side),
+                liq_price=self._calc_liq_price(sid, signal.entry_price, signal.side),
                 created_at=now_ms,
                 updated_at=now_ms,
             )
@@ -622,6 +627,7 @@ class RuntimeEngine:
 
         trade_id = await self._db.insert_trade(
             Trade(
+                strategy=sid,
                 symbol=self._settings.binance.symbol,
                 position_id=pos_id,
                 side="BUY" if signal.side == "LONG" else "SELL",
@@ -638,6 +644,7 @@ class RuntimeEngine:
         )
         await self._db.insert_ledger(
             LedgerEntry(
+                strategy=sid,
                 timestamp=now_ms,
                 type="fee",
                 amount=-fee,
@@ -652,6 +659,7 @@ class RuntimeEngine:
         await self._stream_store.add_event(
             {
                 "type": "trade",
+                "sid": sid,
                 "trade_id": trade_id,
                 "symbol": self._settings.binance.symbol,
                 "side": "BUY" if signal.side == "LONG" else "SELL",
@@ -669,6 +677,7 @@ class RuntimeEngine:
         await self._stream_store.add_event(
             {
                 "type": "entry",
+                "sid": sid,
                 "side": signal.side,
                 "price": signal.entry_price,
                 "ts": now_ms,
@@ -678,18 +687,20 @@ class RuntimeEngine:
         await self._stream_store.update_snapshot(
             last_signal={
                 "type": "entry",
+                "sid": sid,
                 "side": signal.side,
                 "price": signal.entry_price,
                 "ts": now_ms,
                 "reason": signal.reason,
             }
         )
-        await self._alert.alert("INFO", "ENTRY", f"{signal.side} @ {signal.entry_price}", "entry")
+        await self._alert.alert("INFO", f"ENTRY[{sid}]", f"{signal.side} @ {signal.entry_price}", f"entry_{sid}")
 
-    async def _close_by_action(self, action: ExitAction) -> None:
-        if self._position is None:
+    async def _close_by_action(self, sid: str, action: ExitAction) -> None:
+        if self._positions.get(sid) is None:
             return
-        pos = self._position
+        pos = self._positions[sid]
+        acc = self._accounts[sid]
         qty_to_close = pos.qty
 
         if action.action == "TP1" and not pos.tp1_hit:
@@ -701,15 +712,16 @@ class RuntimeEngine:
         notional = qty_to_close * action.price
         fee = notional * self._settings.sim.fee_rate
 
-        self._account.balance += realized - fee
+        acc.balance += realized - fee
 
         now_ms = int(time.time() * 1000)
 
-        row = await self._db.get_open_position(self._settings.binance.symbol)
+        row = await self._db.get_open_position(self._settings.binance.symbol, strategy=sid)
         pos_id = int(row["position_id"]) if row is not None else 0
 
         trade_id = await self._db.insert_trade(
             Trade(
+                strategy=sid,
                 symbol=self._settings.binance.symbol,
                 position_id=pos_id,
                 side="SELL" if pos.side == "LONG" else "BUY",
@@ -726,6 +738,7 @@ class RuntimeEngine:
         )
         await self._db.insert_ledger(
             LedgerEntry(
+                strategy=sid,
                 timestamp=now_ms,
                 type="fee",
                 amount=-fee,
@@ -738,6 +751,7 @@ class RuntimeEngine:
         )
 
         trade_payload = {
+            "sid": sid,
             "trade_id": trade_id,
             "symbol": self._settings.binance.symbol,
             "side": "SELL" if pos.side == "LONG" else "BUY",
@@ -758,6 +772,7 @@ class RuntimeEngine:
             await self._db.upsert_position_open(
                 PositionOpen(
                     position_id=pos_id,
+                    strategy=sid,
                     symbol=self._settings.binance.symbol,
                     side=pos.side,
                     qty=pos.qty,
@@ -777,18 +792,19 @@ class RuntimeEngine:
                 )
             )
             await self._stream_store.add_event(
-                {"type": "tp1", "side": pos.side, "price": action.price, "ts": now_ms}
+                {"type": "tp1", "sid": sid, "side": pos.side, "price": action.price, "ts": now_ms}
             )
             await self._stream_store.update_snapshot(
-                last_signal={"type": "tp1", "side": pos.side, "price": action.price, "ts": now_ms}
+                last_signal={"type": "tp1", "sid": sid, "side": pos.side, "price": action.price, "ts": now_ms}
             )
             await self._stream_store.add_event({"type": "trade", **trade_payload})
-            await self._alert.alert("INFO", "TP1", f"@ {action.price}", "tp1")
+            await self._alert.alert("INFO", f"TP1[{sid}]", f"@ {action.price}", f"tp1_{sid}")
             return
 
         await self._db.close_position(
             PositionClose(
                 position_id=pos_id,
+                strategy=sid,
                 status="CLOSED",
                 realized_pnl=float(row["realized_pnl"]) + realized,
                 fees_total=float(row["fees_total"]) + fee,
@@ -800,21 +816,22 @@ class RuntimeEngine:
         )
 
         if action.action == "STOP":
-            self._cooldown_bars = self._settings.strategy.cooldown_after_stop
+            self._cooldowns[sid] = self._settings.strategy.cooldown_after_stop
 
         await self._stream_store.add_event(
-            {"type": "exit", "side": pos.side, "price": action.price, "ts": now_ms, "reason": action.reason}
+            {"type": "exit", "sid": sid, "side": pos.side, "price": action.price, "ts": now_ms, "reason": action.reason}
         )
         await self._stream_store.update_snapshot(
-            last_signal={"type": "exit", "side": pos.side, "price": action.price, "ts": now_ms}
+            last_signal={"type": "exit", "sid": sid, "side": pos.side, "price": action.price, "ts": now_ms}
         )
         await self._stream_store.add_event({"type": "trade", **trade_payload})
-        await self._alert.alert("INFO", action.action, f"@ {action.price}", action.action.lower())
-        self._position = None
+        await self._alert.alert("INFO", f"{action.action}[{sid}]", f"@ {action.price}", f"{action.action.lower()}_{sid}")
+        self._positions[sid] = None
 
         # realized PnL ledger entry
         await self._db.insert_ledger(
             LedgerEntry(
+                strategy=sid,
                 timestamp=now_ms,
                 type="realized_pnl",
                 amount=realized,
@@ -826,17 +843,18 @@ class RuntimeEngine:
             )
         )
         # final funding check on close
-        await self._maybe_apply_funding(force=True, price_hint=action.price)
+        await self._maybe_apply_funding(force=True, price_hint=action.price, sid=sid)
 
     def _calc_realized_pnl(self, pos: PositionState, price: float, qty: float) -> float:
         if pos.side == "LONG":
             return (price - pos.entry_price) * qty
         return (pos.entry_price - price) * qty
 
-    def _calc_liq_price(self, entry_price: float, side: str) -> float:
+    def _calc_liq_price(self, sid: str, entry_price: float, side: str) -> float:
         # Binance-like isolated estimate: margin + PnL = maint_margin
         lev = self._settings.sim.max_leverage
-        qty = self._position.qty if self._position else 0.0
+        pos = self._positions.get(sid)
+        qty = pos.qty if pos else 0.0
         if qty <= 0:
             return entry_price
         notional_entry = entry_price * qty
@@ -862,61 +880,76 @@ class RuntimeEngine:
         return float(last["mmr"]), float(last.get("maint_amount", 0.0))
 
     async def _update_status(self, price: float) -> None:
-        upl = 0.0
-        margin_used = 0.0
-        liq = None
-        if self._position is not None:
-            upl = self._calc_realized_pnl(self._position, price, self._position.qty)
-            notional = self._position.qty * price
-            margin_used = notional / self._settings.sim.max_leverage
-            liq = self._calc_liq_price(self._position.entry_price, self._position.side)
+        # compute per-strategy account status
+        for sid, acc in self._accounts.items():
+            pos = self._positions.get(sid)
+            upl = 0.0
+            margin_used = 0.0
+            liq = None
+            if pos is not None:
+                upl = self._calc_realized_pnl(pos, price, pos.qty)
+                notional = pos.qty * price
+                margin_used = notional / self._settings.sim.max_leverage
+                liq = self._calc_liq_price(sid, pos.entry_price, pos.side)
 
-        equity = self._account.balance + upl
-        free_margin = equity - margin_used
+            equity = acc.balance + upl
+            free_margin = equity - margin_used
+            acc.upl = upl
+            acc.equity = equity
+            acc.margin_used = margin_used
+            acc.free_margin = free_margin
 
-        self._account.upl = upl
-        self._account.equity = equity
-        self._account.margin_used = margin_used
-        self._account.free_margin = free_margin
-
+        # status_store keeps selected/default strategy summary
+        sid = next(iter(self._strategies.keys()))
+        pos = self._positions.get(sid)
+        acc = self._accounts[sid]
+        liq = self._calc_liq_price(sid, pos.entry_price, pos.side) if pos else None
         await self._status_store.update(
-            balance=self._account.balance,
-            equity=equity,
-            upl=upl,
-            margin_used=margin_used,
-            free_margin=free_margin,
+            balance=acc.balance,
+            equity=acc.equity,
+            upl=acc.upl,
+            margin_used=acc.margin_used,
+            free_margin=acc.free_margin,
             liq_price=liq,
-            position_side=self._position.side if self._position else None,
-            position_qty=self._position.qty if self._position else None,
-            entry_price=self._position.entry_price if self._position else None,
-            stop_price=self._position.stop_price if self._position else None,
-            tp1_price=self._position.tp1_price if self._position else None,
-            tp2_price=self._position.tp2_price if self._position else None,
-            cooldown_bars=self._cooldown_bars,
+            position_side=pos.side if pos else None,
+            position_qty=pos.qty if pos else None,
+            entry_price=pos.entry_price if pos else None,
+            stop_price=pos.stop_price if pos else None,
+            tp1_price=pos.tp1_price if pos else None,
+            tp2_price=pos.tp2_price if pos else None,
+            cooldown_bars=self._cooldowns.get(sid, 0),
         )
 
     async def _snapshot_equity(self) -> None:
         now_ms = int(time.time() * 1000)
-        await self._db.insert_equity_snapshot(
-            EquitySnapshot(
-                timestamp=now_ms,
-                balance=self._account.balance,
-                equity=self._account.equity,
-                upl=self._account.upl,
-                margin_used=self._account.margin_used,
-                free_margin=self._account.free_margin,
+        for sid, acc in self._accounts.items():
+            await self._db.insert_equity_snapshot(
+                EquitySnapshot(
+                    strategy=sid,
+                    timestamp=now_ms,
+                    balance=acc.balance,
+                    equity=acc.equity,
+                    upl=acc.upl,
+                    margin_used=acc.margin_used,
+                    free_margin=acc.free_margin,
+                )
             )
-        )
 
     def runtime_state(self) -> dict:
         return {
             "buffers": {k: len(self._buffers.buffer(k)) for k in self._buffers.intervals()} if self._buffers else {},
-            "position": {
-                "side": self._position.side if self._position else None,
-                "qty": self._position.qty if self._position else None,
-                "entry": self._position.entry_price if self._position else None,
+            "strategies": {
+                sid: {
+                    "position": {
+                        "side": self._positions[sid].side if self._positions.get(sid) else None,
+                        "qty": self._positions[sid].qty if self._positions.get(sid) else None,
+                        "entry": self._positions[sid].entry_price if self._positions.get(sid) else None,
+                    },
+                    "cooldown_bars": self._cooldowns.get(sid, 0),
+                    "equity": self._accounts[sid].equity if sid in self._accounts else None,
+                }
+                for sid in self._strategies.keys()
             },
-            "cooldown_bars": self._cooldown_bars,
         }
 
     async def send_alert(self, level: str, title: str, message: str) -> None:
@@ -935,9 +968,9 @@ class RuntimeEngine:
                 logger.exception("Funding loop error")
             await asyncio.sleep(60)
 
-    async def _maybe_apply_funding(self, force: bool = False, price_hint: Optional[float] = None) -> None:
-        if self._position is None:
-            return
+    async def _maybe_apply_funding(
+        self, force: bool = False, price_hint: Optional[float] = None, sid: Optional[str] = None
+    ) -> None:
         try:
             async with httpx.AsyncClient(base_url=self._settings.binance.rest_base, timeout=10.0) as client:
                 resp = await client.get(
@@ -958,29 +991,41 @@ class RuntimeEngine:
         now_ms = int(time.time() * 1000)
         if not force and abs(now_ms - fr_time) > 3 * 60 * 1000:
             return
-        rows = await self._db.fetchall(
-            "SELECT 1 FROM ledger WHERE type='funding' AND ref=? LIMIT 1", (str(fr_time),)
-        )
-        if rows and not force:
-            return
 
-        price = price_hint or self._last_price or self._position.entry_price
-        notional = self._position.qty * price
-        pnl = notional * rate * (1 if self._position.side == "LONG" else -1)
-        self._account.balance += pnl
-        await self._update_status(price)
-        now_ms = int(time.time() * 1000)
-        await self._db.insert_ledger(
-            LedgerEntry(
-                timestamp=fr_time,
-                type="funding",
-                amount=pnl,
-                currency="USDT",
-                symbol=self._settings.binance.symbol,
-                ref=str(fr_time),
-                note=f"rate={rate}",
-                created_at=now_ms,
+        strategy_ids = [sid] if sid else list(self._strategies.keys())
+        for strategy_id in strategy_ids:
+            pos = self._positions.get(strategy_id)
+            if pos is None:
+                continue
+            rows = await self._db.fetchall(
+                "SELECT 1 FROM ledger WHERE strategy=? AND type='funding' AND ref=? LIMIT 1",
+                (strategy_id, str(fr_time)),
             )
-        )
+            if rows and not force:
+                continue
+            price = price_hint or self._last_price or pos.entry_price
+            notional = pos.qty * price
+            pnl = notional * rate * (1 if pos.side == "LONG" else -1)
+            self._accounts[strategy_id].balance += pnl
+            now_ms = int(time.time() * 1000)
+            await self._db.insert_ledger(
+                LedgerEntry(
+                    strategy=strategy_id,
+                    timestamp=fr_time,
+                    type="funding",
+                    amount=pnl,
+                    currency="USDT",
+                    symbol=self._settings.binance.symbol,
+                    ref=str(fr_time),
+                    note=f"rate={rate}",
+                    created_at=now_ms,
+                )
+            )
+            await self._alert.alert(
+                "INFO",
+                f"FUNDING[{strategy_id}]",
+                f"rate={rate:.6f} pnl={pnl:.4f}",
+                dedup_key=f"funding_{strategy_id}_{fr_time}",
+            )
+        await self._update_status(price_hint or self._last_price or 0.0)
         await self._snapshot_equity()
-        await self._alert.alert("INFO", "FUNDING", f"rate={rate:.6f} pnl={pnl:.4f}", dedup_key=f"funding_{fr_time}")

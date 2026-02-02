@@ -77,6 +77,13 @@ class StrategyConfig(BaseModel):
     rsi_slope_required: bool = True
 
 
+class StrategyEntryConfig(BaseModel):
+    id: str = "test"
+    type: str = "test"  # test | ma_cross
+    initial_capital: Optional[float] = None
+    params: Dict[str, Any] = Field(default_factory=dict)
+
+
 class KlineCacheConfig(BaseModel):
     max_bars_15m: int = 2000
     max_bars_1h: int = 2000
@@ -139,6 +146,7 @@ class Settings(BaseSettings):
     indicators: IndicatorConfig = Field(default_factory=IndicatorConfig)
     cooldown: CooldownConfig = Field(default_factory=CooldownConfig)
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
+    strategies: List[StrategyEntryConfig] = Field(default_factory=lambda: [StrategyEntryConfig()])
     kline_cache: KlineCacheConfig = Field(default_factory=KlineCacheConfig)
     alerts: AlertsConfig = Field(default_factory=AlertsConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
