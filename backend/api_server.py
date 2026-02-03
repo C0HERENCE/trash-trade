@@ -459,7 +459,8 @@ async def get_indicator_history(
     atr_len = ind_cfg.get("atr", {}).get("length", 14)
 
     req = {sid: {interval: {"ema": [ema_fast, ema_slow], "rsi": rsi_len, "macd": macd_cfg, "atr": atr_len}}}
-    engine = IndicatorEngine(req)
+    specs = build_specs_from_legacy(req)
+    engine = IndicatorEngine(specs)
     series = []
     for r in items:
         bar = KlineBar(
@@ -475,16 +476,20 @@ async def get_indicator_history(
             source=r["source"],
         )
         snap_map = engine.update_on_close(interval, bar)
-        snap = snap_map.get(sid)
-        if snap is None:
+        res_map = snap_map.get(sid)
+        if res_map is None:
             continue
+        ema_fast_res = res_map.get("ema_fast")
+        ema_slow_res = res_map.get("ema_slow")
+        rsi_res = res_map.get("rsi")
+        macd_res = res_map.get("macd_hist")
         series.append(
             {
                 "time": int(r["open_time"]) // 1000,
-                "ema20": snap.ema_fast,
-                "ema60": snap.ema_slow,
-                "rsi14": snap.rsi,
-                "macd_hist": snap.macd_hist,
+                "ema20": ema_fast_res.value if ema_fast_res else None,
+                "ema60": ema_slow_res.value if ema_slow_res else None,
+                "rsi14": rsi_res.value if rsi_res else None,
+                "macd_hist": macd_res.value if macd_res else None,
             }
         )
     return {"items": series}
