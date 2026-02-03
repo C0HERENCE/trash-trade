@@ -13,7 +13,6 @@ MarketStateManager
 from typing import Dict, Any, Optional, Tuple
 
 from ..indicators.engine import IndicatorEngine
-from ..indicators.legacy_adapter import build_specs_from_legacy
 from ..marketdata.buffer import (
     KlineBufferManager,
     KlineBar,
@@ -44,16 +43,9 @@ class MarketStateManager:
         warmup: Dict[str, int] = {i: 0 for i in intervals}
         maxlen: Dict[str, int] = {i: 0 for i in intervals}
         self.indicator_specs = {}
-        self.indicator_requirements = {}  # keep legacy for backward compat export
 
         for sid, strat in strategies.items():
-            req = strat.indicator_requirements() or {}
-            # If new-style list, use directly; else convert
-            if isinstance(req, list):
-                specs = req
-            else:
-                self.indicator_requirements[sid] = req
-                specs = build_specs_from_legacy({sid: req}).get(sid, [])
+            specs = strat.indicator_requirements() or []
             self.indicator_specs[sid] = specs
 
             kc = profiles[sid].get("kline_cache", {}) if sid in profiles else {}

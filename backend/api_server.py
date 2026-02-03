@@ -19,8 +19,8 @@ from fastapi.staticfiles import StaticFiles
 from .config import load_settings
 from .db import Database
 from .indicators.engine import IndicatorEngine
-from .indicators.legacy_adapter import build_specs_from_legacy
 from .marketdata.buffer import KlineBar
+from .strategy import TestStrategy, MaCrossStrategy
 import msgpack
 
 
@@ -420,19 +420,81 @@ async def get_klines(
     return {"items": items}
 
 
-def _load_strategy_indicators(strategy_id: str) -> Dict[str, Any]:
-    for s in settings.strategies:
-        if s.id != strategy_id:
-            continue
-        if s.config_path:
-            p = Path(s.config_path)
-            if not p.is_absolute():
-                p = (Path.cwd() / p).resolve()
-            if p.exists():
-                loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict) and isinstance(loaded.get("indicators"), dict):
-                    return loaded["indicators"]
-    return {}
+def _deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _deep_update(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def _build_profile(entry) -> Dict[str, Any]:
+    base_sim = {
+        "initial_capital": settings.sim.initial_capital,
+        "max_leverage": settings.sim.max_leverage,
+        "fee_rate": settings.sim.fee_rate,
+        "slippage": settings.sim.slippage,
+    }
+    base_risk = {
+        "max_position_notional": settings.risk.max_position_notional,
+        "max_position_pct_equity": settings.risk.max_position_pct_equity,
+        "mmr_tiers": settings.risk.mmr_tiers,
+    }
+    default_kcache = {
+        "max_bars_15m": 2000,
+        "max_bars_1h": 2000,
+        "warmup_buffer_mult": 3.0,
+        "warmup_extra_bars": 200,
+    }
+    if entry.type == "ma_cross":
+        strategy_defaults = {"atr_stop_mult": 1.2, "cooldown_after_stop": 2}
+        indicator_defaults = {
+            "ema_fast": {"length": 20},
+            "ema_slow": {"length": 60},
+            "ema_trend": {"fast": 20, "slow": 60},
+            "rsi": {"length": 14},
+            "atr": {"length": 14},
+        }
+    else:
+        strategy_defaults = {
+            "trend_strength_min": 0.003,
+            "atr_stop_mult": 1.5,
+            "cooldown_after_stop": 4,
+            "rsi_long_lower": 50.0,
+            "rsi_long_upper": 60.0,
+            "rsi_short_upper": 50.0,
+            "rsi_short_lower": 40.0,
+            "rsi_slope_required": True,
+        }
+        indicator_defaults = {
+            "rsi": {"length": 14},
+            "ema_fast": {"length": 12},
+            "ema_slow": {"length": 26},
+            "macd": {"fast": 12, "slow": 26, "signal": 9},
+            "atr": {"length": 14},
+            "ema_trend": {"fast": 20, "slow": 60},
+        }
+    profile = {
+        "sim": base_sim,
+        "risk": base_risk,
+        "strategy": strategy_defaults,
+        "indicators": indicator_defaults,
+        "kline_cache": default_kcache,
+    }
+    if entry.config_path:
+        p = Path(entry.config_path)
+        if not p.is_absolute():
+            p = (Path.cwd() / p).resolve()
+        if p.exists():
+            loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                _deep_update(profile, loaded)
+    if isinstance(entry.params, dict) and entry.params:
+        _deep_update(profile, entry.params)
+    if entry.initial_capital is not None:
+        profile["sim"]["initial_capital"] = entry.initial_capital
+    return profile
 
 
 @app.get("/api/indicator_history")
@@ -452,16 +514,13 @@ async def get_indicator_history(
         return {"items": []}
 
     sid = strategy or DEFAULT_STRATEGY
-    ind_cfg = _load_strategy_indicators(sid)
-    ema_fast = ind_cfg.get("ema_fast", {}).get("length", 20)
-    ema_slow = ind_cfg.get("ema_slow", {}).get("length", 60)
-    rsi_len = ind_cfg.get("rsi", {}).get("length", 14)
-    macd_cfg = ind_cfg.get("macd", {"fast": 12, "slow": 26, "signal": 9})
-    atr_len = ind_cfg.get("atr", {}).get("length", 14)
-
-    req = {sid: {interval: {"ema": [ema_fast, ema_slow], "rsi": rsi_len, "macd": macd_cfg, "atr": atr_len}}}
-    specs = build_specs_from_legacy(req)
-    engine = IndicatorEngine(specs)
+    entry = next((s for s in settings.strategies if s.id == sid), settings.strategies[0])
+    profile = _build_profile(entry)
+    strat = MaCrossStrategy() if entry.type == "ma_cross" else TestStrategy()
+    strat.id = entry.id
+    strat.configure(profile)
+    specs = strat.indicator_requirements()
+    engine = IndicatorEngine({sid: specs})
     series = []
     for r in items:
         bar = KlineBar(
