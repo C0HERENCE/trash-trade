@@ -11,6 +11,7 @@ const props = defineProps({
 const chartContainer = ref(null)
 let chart = null
 let subSeries = []
+const typesMap = ref({})
 
 const basePath = (() => {
   const path = window.location.pathname
@@ -49,12 +50,12 @@ const loadIndicatorHistory = async () => {
     const data = await res.json()
     const hints = data.hints || {}
     const subs = hints.subchart || []
-    const types = hints.types || {}
+    typesMap.value = hints.types || {}
     loadVisibility()
     subSeries = subs.map((name, idx) => ({
       name,
       series:
-        types[name] === 'histogram'
+        typesMap.value[name] === 'histogram'
           ? chart?.addHistogramSeries({ color: '#7ee787' })
           : chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 }),
       data: [],
@@ -65,7 +66,7 @@ const loadIndicatorHistory = async () => {
       subs.forEach((name, idx) => {
         const v = i[name]
         if (v !== null && v !== undefined) {
-          if (types[name] === 'histogram') {
+          if (typesMap.value[name] === 'histogram') {
             subSeries[idx].data.push({ time: i.time, value: v, color: v >= 0 ? '#7ee787' : '#ff6b6b' })
           } else {
             subSeries[idx].data.push({ time: i.time, value: v })
@@ -128,6 +129,7 @@ watch(() => props.strategy, async () => {
 
 watch(() => props.indicators, (i) => {
   if (!i || !props.kline) return
+  if (!chart) return
   if (!subSeries.length) {
     const keys = Object.keys(i || {})
     subSeries = keys.map((name, idx) => ({
@@ -141,7 +143,7 @@ watch(() => props.indicators, (i) => {
   subSeries.forEach(({ name, series }) => {
     const v = i[name]
     if (v !== undefined && v !== null) {
-      if (types[name] === 'histogram') {
+      if (typesMap.value[name] === 'histogram') {
         series?.update({ time: t, value: v, color: v >= 0 ? '#7ee787' : '#ff6b6b' })
       } else {
         series?.update({ time: t, value: v })
