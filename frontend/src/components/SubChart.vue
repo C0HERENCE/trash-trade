@@ -26,6 +26,14 @@ const withStrategy = (url) => {
   return url + (url.includes('?') ? '&' : '?') + `strategy=${encodeURIComponent(props.strategy)}`
 }
 
+const pick = (obj, keys, fallback = null) => {
+  if (!obj) return fallback
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null) return obj[k]
+  }
+  return fallback
+}
+
 const loadIndicatorHistory = async () => {
   try {
     const res = await fetch(withStrategy(api('/api/indicator_history?interval=15m&limit=500')))
@@ -35,9 +43,13 @@ const loadIndicatorHistory = async () => {
     const rsi = []
     
     items.forEach(i => {
-      if (i.ema20 !== null && i.ema20 !== undefined) {
-        macd.push({ time: i.time, value: i.macd_hist, color: i.macd_hist >= 0 ? '#7ee787' : '#ff6b6b' })
-        rsi.push({ time: i.time, value: i.rsi14 })
+      const m = pick(i, ['macd_hist_15m', 'macd_hist', 'macd'])
+      const r = pick(i, ['rsi14_15m', 'rsi14', 'rsi'])
+      if (m !== null && m !== undefined) {
+        macd.push({ time: i.time, value: m, color: m >= 0 ? '#7ee787' : '#ff6b6b' })
+      }
+      if (r !== null && r !== undefined) {
+        rsi.push({ time: i.time, value: r })
       }
     })
     
@@ -99,8 +111,10 @@ watch(() => props.strategy, async () => {
 watch(() => props.indicators, (i) => {
   if (!i || !props.kline) return
   const t = Math.floor(props.kline.t / 1000)
-  macdSeries?.update({ time: t, value: i.macd_hist, color: i.macd_hist >= 0 ? '#7ee787' : '#ff6b6b' })
-  rsiSeries?.update({ time: t, value: i.rsi14 })
+  const m = pick(i, ['macd_hist_15m', 'macd_hist', 'macd'])
+  const r = pick(i, ['rsi14_15m', 'rsi14', 'rsi'])
+  if (m !== undefined && m !== null) macdSeries?.update({ time: t, value: m, color: m >= 0 ? '#7ee787' : '#ff6b6b' })
+  if (r !== undefined && r !== null) rsiSeries?.update({ time: t, value: r })
 })
 </script>
 

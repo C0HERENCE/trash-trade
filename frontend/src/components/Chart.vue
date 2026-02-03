@@ -75,6 +75,14 @@ const loadHistory = async () => {
   }
 }
 
+const pick = (obj, keys, fallback = null) => {
+  if (!obj) return fallback
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null) return obj[k]
+  }
+  return fallback
+}
+
 const loadIndicatorHistory = async () => {
   try {
     const res = await fetch(withStrategy(api('/api/indicator_history?interval=15m&limit=500')))
@@ -84,9 +92,13 @@ const loadIndicatorHistory = async () => {
     const ema60 = []
     
     items.forEach(i => {
-      if (i.ema20 !== null && i.ema20 !== undefined) {
-        ema20.push({ time: i.time, value: i.ema20 })
-        ema60.push({ time: i.time, value: i.ema60 })
+      const e20 = pick(i, ['ema20_15m', 'ema20', 'ema_fast'])
+      const e60 = pick(i, ['ema60_15m', 'ema60', 'ema_slow'])
+      if (e20 !== null && e20 !== undefined) {
+        ema20.push({ time: i.time, value: e20 })
+      }
+      if (e60 !== null && e60 !== undefined) {
+        ema60.push({ time: i.time, value: e60 })
       }
     })
     
@@ -182,8 +194,10 @@ watch(() => props.kline, (k) => {
 watch(() => props.indicators, (i) => {
   if (!i || !props.kline || !ema20Series || !ema60Series) return
   const t = Math.floor(props.kline.t / 1000)
-  ema20Series.update({ time: t, value: i.ema20 })
-  ema60Series.update({ time: t, value: i.ema60 })
+  const e20 = pick(i, ['ema20_15m', 'ema20', 'ema_fast'])
+  const e60 = pick(i, ['ema60_15m', 'ema60', 'ema_slow'])
+  if (e20 !== undefined && e20 !== null) ema20Series.update({ time: t, value: e20 })
+  if (e60 !== undefined && e60 !== null) ema60Series.update({ time: t, value: e60 })
 })
 
 watch(() => props.events, (evs) => {
