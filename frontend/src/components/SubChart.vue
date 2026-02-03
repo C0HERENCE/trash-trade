@@ -47,7 +47,10 @@ const loadIndicatorHistory = async () => {
         }
       })
     })
-    subSeries.forEach(s => s.series?.setData(s.data))
+    subSeries.forEach(s => {
+      s.series?.setData(s.data)
+      console.debug('[subchart] setData for', s.name, 'points:', s.data.length)
+    })
   } catch (error) {
     console.error('Failed to load indicator history:', error)
   }
@@ -114,6 +117,7 @@ watch(() => props.indicators, (i) => {
     const v = i[name]
     if (v !== undefined && v !== null) {
       series?.update({ time: t, value: v })
+      if (Math.random() < 0.01) console.debug('[subchart] live update', name, 'value', v, 'time', t)
     } else {
       console.debug('[subchart] missing value for', name, 'payload keys', Object.keys(i || {}))
     }

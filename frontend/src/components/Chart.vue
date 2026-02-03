@@ -100,7 +100,10 @@ const loadIndicatorHistory = async () => {
         }
       })
     })
-    overlaySeries.forEach(s => s.series?.setData(s.data))
+    overlaySeries.forEach(s => {
+      s.series?.setData(s.data)
+      console.debug('[chart] setData for', s.name, 'points:', s.data.length)
+    })
   } catch (error) {
     console.error('Failed to load indicator history:', error)
   }
@@ -201,6 +204,7 @@ watch(() => props.indicators, (i) => {
     const v = i[name]
     if (v !== undefined && v !== null) {
       series?.update({ time: t, value: v })
+      if (Math.random() < 0.01) console.debug('[chart] live update', name, 'value', v, 'time', t)
     } else {
       console.debug('[chart] missing value for overlay', name, 'payload keys', Object.keys(i || {}))
     }
