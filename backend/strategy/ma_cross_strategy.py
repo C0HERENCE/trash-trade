@@ -42,8 +42,22 @@ class MaCrossStrategy(IStrategy):
 
         cond_long = []
         cond_short = []
-        cond_long.append(item("15m EMA 多头", ctx.ind_15m.ema20 > ctx.ind_15m.ema60, info=f"ema20:{ctx.ind_15m.ema20:.2f}, ema60:{ctx.ind_15m.ema60:.2f}"))
-        cond_short.append(item("15m EMA 空头", ctx.ind_15m.ema20 < ctx.ind_15m.ema60, info=f"ema20:{ctx.ind_15m.ema20:.2f}, ema60:{ctx.ind_15m.ema60:.2f}"))
+        prev_e20 = ctx.prev_ema20_15m if ctx.prev_ema20_15m is not None else ctx.ind_15m.ema20
+        prev_e60 = ctx.prev_ema60_15m if ctx.prev_ema60_15m is not None else ctx.ind_15m.ema60
+        cond_long.append(
+            item(
+                "15m EMA 多头",
+                ctx.ind_15m.ema20 > ctx.ind_15m.ema60,
+                info=f"ema20:{ctx.ind_15m.ema20:.2f}(prev:{prev_e20:.2f}), ema60:{ctx.ind_15m.ema60:.2f}(prev:{prev_e60:.2f}), 期望 ema20>ema60",
+            )
+        )
+        cond_short.append(
+            item(
+                "15m EMA 空头",
+                ctx.ind_15m.ema20 < ctx.ind_15m.ema60,
+                info=f"ema20:{ctx.ind_15m.ema20:.2f}(prev:{prev_e20:.2f}), ema60:{ctx.ind_15m.ema60:.2f}(prev:{prev_e60:.2f}), 期望 ema20<ema60",
+            )
+        )
         cond_long.append(item("1h RSI 多头", ctx.ind_1h.rsi14 > 50, value=ctx.ind_1h.rsi14, target=">50"))
         cond_short.append(item("1h RSI 空头", ctx.ind_1h.rsi14 < 50, value=ctx.ind_1h.rsi14, target="<50"))
         cond_long.append(item("ATR 止损可用", ctx.atr14 is not None, value=ctx.atr14))

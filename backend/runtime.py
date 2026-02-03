@@ -71,6 +71,10 @@ class RuntimeEngine:
         self._prev_macd_hist_15m: dict[str, Optional[float]] = {}
         self._prev2_macd_hist_15m: dict[str, Optional[float]] = {}
         self._ind_1h: Optional[Indicators1h] = None
+        self._prev_ema20_15m: Optional[float] = None
+        self._prev_ema60_15m: Optional[float] = None
+        self._last_ema20_15m: Optional[float] = None
+        self._last_ema60_15m: Optional[float] = None
 
         self._last_price: float = 0.0
         self._ws_task: Optional[asyncio.Task] = None
@@ -444,6 +448,10 @@ class RuntimeEngine:
             rsi14=snapshot.rsi14,
             macd_hist=snapshot.macd_hist,
         )
+        self._prev_ema20_15m = self._last_ema20_15m
+        self._prev_ema60_15m = self._last_ema60_15m
+        self._last_ema20_15m = snapshot.ema20
+        self._last_ema60_15m = snapshot.ema60
         await self._stream_store.update_snapshot(
             indicators_15m={
                 "ema20": snapshot.ema20,
@@ -470,6 +478,8 @@ class RuntimeEngine:
                 prev_rsi_15m=prev_rsi,
                 prev_macd_hist_15m=prev_macd,
                 prev2_macd_hist_15m=prev2_macd,
+                prev_ema20_15m=self._prev_ema20_15m,
+                prev_ema60_15m=self._prev_ema60_15m,
                 atr14=snapshot.atr14,
                 structure_stop=None,
                 position=self._positions.get(sid),
