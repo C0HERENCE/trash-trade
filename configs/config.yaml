@@ -16,50 +16,13 @@ binance:
     base_delay_ms: 500
     max_delay_ms: 10000
 
-sim:
-  initial_capital: 1000.0
-  max_leverage: 20
-  fee_rate: 0.0004
-  slippage: 0.0
-
-risk:
-  max_position_notional: 20000.0   # absolute cap
-  max_position_pct_equity: 1.0     # 1.0 = 100% equity
-  liquidation_buffer_pct: 0.02     # extra margin buffer
-  allow_reduce_only: true
-
-indicators:
-  rsi:
-    length: 14
-  ema_fast:
-    length: 12
-  ema_slow:
-    length: 26
-  macd:
-    fast: 12
-    slow: 26
-    signal: 9
-  atr:
-    length: 14
-  ema_trend:
-    fast: 20
-    slow: 60
-
-strategy:
-  trend_strength_min: 0.003
-  atr_stop_mult: 1.5
-  cooldown_after_stop: 4
-
-cooldown:
-  enabled: true
-  bars_after_exit: 2
-  min_ms_after_exit: 900000        # 15m
-
-kline_cache:
-  max_bars_15m: 2000
-  max_bars_1h: 2000
-  warmup_extra_bars: 200
-  warmup_buffer_mult: 3.0
+strategies:
+  - id: default
+    type: test
+    config_path: "./configs/strategies/default.test.yaml"
+  - id: dual_ma_test
+    type: ma_cross
+    config_path: "./configs/strategies/dual_ma_test.ma_cross.yaml"
 
 alerts:
   enabled: true
