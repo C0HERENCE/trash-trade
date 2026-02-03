@@ -51,8 +51,8 @@ class StrategyContext:
     prev_ema60_15m: Optional[float] = None
 
     # volatility / structure
-    atr14: float
-    structure_stop: Optional[float]
+    atr14: Optional[float] = None
+    structure_stop: Optional[float] = None
 
     # position + cooldown
     position: Optional[PositionState]
