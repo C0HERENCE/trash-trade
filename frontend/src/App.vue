@@ -205,8 +205,6 @@ const applyStreamPayload = (payload) => {
     streamKline.value = payload.k
   }
   if (payload.i15) {
-    const keys = Object.keys(payload.i15 || {})
-    console.debug('[stream] indicators received keys:', keys, 'sample:', Object.fromEntries(Object.entries(payload.i15 || {}).slice(0, 5)))
     streamIndicators.value = payload.i15
   }
   if (payload.sig && payload.sig.t === 'cond') {

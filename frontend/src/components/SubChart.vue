@@ -31,7 +31,6 @@ const loadIndicatorHistory = async () => {
     const data = await res.json()
     const hints = data.hints || {}
     const subs = hints.subchart || []
-    console.debug('[subchart] history hints subchart:', subs)
     subSeries = subs.map((name, idx) => ({
       name,
       series: chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 }),
@@ -47,10 +46,7 @@ const loadIndicatorHistory = async () => {
         }
       })
     })
-    subSeries.forEach(s => {
-      s.series?.setData(s.data)
-      console.debug('[subchart] setData for', s.name, 'points:', s.data.length)
-    })
+    subSeries.forEach(s => s.series?.setData(s.data))
   } catch (error) {
     console.error('Failed to load indicator history:', error)
   }
@@ -110,16 +106,12 @@ watch(() => props.indicators, (i) => {
       name,
       series: chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 })
     }))
-    console.debug('[subchart] created sub series from live keys:', keys)
   }
   const t = Math.floor(props.kline.t / 1000)
   subSeries.forEach(({ name, series }) => {
     const v = i[name]
     if (v !== undefined && v !== null) {
       series?.update({ time: t, value: v })
-      if (Math.random() < 0.01) console.debug('[subchart] live update', name, 'value', v, 'time', t)
-    } else {
-      console.debug('[subchart] missing value for', name, 'payload keys', Object.keys(i || {}))
     }
   })
 })

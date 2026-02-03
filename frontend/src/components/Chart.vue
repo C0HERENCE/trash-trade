@@ -80,7 +80,6 @@ const loadIndicatorHistory = async () => {
     const data = await res.json()
     const items = data.items || []
     const overlays = (data.hints && data.hints.price_overlays) || []
-    console.debug('[chart] history hints overlays:', overlays)
 
     // create series for each overlay field
     overlaySeries = overlays.map((name, idx) => ({
@@ -100,10 +99,7 @@ const loadIndicatorHistory = async () => {
         }
       })
     })
-    overlaySeries.forEach(s => {
-      s.series?.setData(s.data)
-      console.debug('[chart] setData for', s.name, 'points:', s.data.length)
-    })
+    overlaySeries.forEach(s => s.series?.setData(s.data))
   } catch (error) {
     console.error('Failed to load indicator history:', error)
   }
@@ -197,16 +193,12 @@ watch(() => props.indicators, (i) => {
       name,
       series: chart?.addLineSeries({ color: idx === 0 ? '#5cc8ff' : '#ffb86c', lineWidth: 1 })
     }))
-    console.debug('[chart] created overlay series from live keys:', keys)
   }
   const t = Math.floor(props.kline.t / 1000)
   overlaySeries.forEach(({ name, series }) => {
     const v = i[name]
     if (v !== undefined && v !== null) {
       series?.update({ time: t, value: v })
-      if (Math.random() < 0.01) console.debug('[chart] live update', name, 'value', v, 'time', t)
-    } else {
-      console.debug('[chart] missing value for overlay', name, 'payload keys', Object.keys(i || {}))
     }
   })
 })
