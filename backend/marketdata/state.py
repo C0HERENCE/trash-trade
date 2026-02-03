@@ -175,20 +175,15 @@ class MarketStateManager:
                 rsi_res = snap.get("rsi")
                 if not ema_fast or not ema_slow or not rsi_res:
                     continue
-                self.ind_1h_map[sid] = Indicators1h(
-                    ema20=ema_fast.value,
-                    ema60=ema_slow.value,
-                    rsi14=rsi_res.value,
-                    close=bar.close,
-                )
+                self.ind_1h_map[sid] = {
+                    "ema20_1h": ema_fast.value,
+                    "ema60_1h": ema_slow.value,
+                    "rsi14_1h": rsi_res.value,
+                    "close_1h": bar.close,
+                }
             first = next(iter(self.ind_1h_map.values()), None)
             if first:
-                stream_updates["indicators_1h"] = {
-                    "ema20": first.ema20,
-                    "ema60": first.ema60,
-                    "rsi14": first.rsi14,
-                    "close": first.close,
-                }
+                stream_updates["indicators_1h"] = first
             return {"stream": stream_updates, "strategies": result}
 
         if interval != "15m":
@@ -201,7 +196,7 @@ class MarketStateManager:
                 continue
             if ind1 is None:
                 # allow describe_conditions to run even if 1h not ready
-                ind1 = {"ema20": None, "ema60": None, "rsi14": None, "close": bar.close}
+                ind1 = {"ema20_1h": None, "ema60_1h": None, "rsi14_1h": None, "close_1h": bar.close}
 
             # build indicators/history dynamically from results
             indicators_map = {name: res.value for name, res in res_map.items() if res is not None}
