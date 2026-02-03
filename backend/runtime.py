@@ -83,14 +83,20 @@ class RuntimeEngine:
         return dst
 
     def _build_strategy_profile(self, entry) -> Dict[str, Any]:
-        # Default per-strategy knobs (no longer taken from global settings)
-        default_indicators = {
-            "rsi": {"length": 14},
-            "ema_fast": {"length": 12},
-            "ema_slow": {"length": 26},
-            "macd": {"fast": 12, "slow": 26, "signal": 9},
-            "atr": {"length": 14},
-            "ema_trend": {"fast": 20, "slow": 60},
+        """
+        构建合并后的策略配置。
+        不同策略类型只注入自己需要的字段，避免无关参数混入。
+        """
+        base_sim = {
+            "initial_capital": self._settings.sim.initial_capital,
+            "max_leverage": self._settings.sim.max_leverage,
+            "fee_rate": self._settings.sim.fee_rate,
+            "slippage": self._settings.sim.slippage,
+        }
+        base_risk = {
+            "max_position_notional": self._settings.risk.max_position_notional,
+            "max_position_pct_equity": self._settings.risk.max_position_pct_equity,
+            "mmr_tiers": self._settings.risk.mmr_tiers,
         }
         default_kcache = {
             "max_bars_15m": 2000,
@@ -99,19 +105,20 @@ class RuntimeEngine:
             "warmup_extra_bars": 200,
         }
 
-        profile: Dict[str, Any] = {
-            "sim": {
-                "initial_capital": self._settings.sim.initial_capital,
-                "max_leverage": self._settings.sim.max_leverage,
-                "fee_rate": self._settings.sim.fee_rate,
-                "slippage": self._settings.sim.slippage,
-            },
-            "risk": {
-                "max_position_notional": self._settings.risk.max_position_notional,
-                "max_position_pct_equity": self._settings.risk.max_position_pct_equity,
-                "mmr_tiers": self._settings.risk.mmr_tiers,
-            },
-            "strategy": {
+        if entry.type == "ma_cross":
+            strategy_defaults = {
+                "atr_stop_mult": 1.2,
+                "cooldown_after_stop": 2,
+            }
+            indicator_defaults = {
+                "ema_fast": {"length": 20},
+                "ema_slow": {"length": 60},
+                "ema_trend": {"fast": 20, "slow": 60},
+                "rsi": {"length": 14},  # 1h 过滤仍需 RSI
+                "atr": {"length": 14},
+            }
+        else:  # test / default 复杂策略
+            strategy_defaults = {
                 "trend_strength_min": 0.003,
                 "atr_stop_mult": 1.5,
                 "cooldown_after_stop": 4,
@@ -120,8 +127,21 @@ class RuntimeEngine:
                 "rsi_short_upper": 50.0,
                 "rsi_short_lower": 40.0,
                 "rsi_slope_required": True,
-            },
-            "indicators": default_indicators,
+            }
+            indicator_defaults = {
+                "rsi": {"length": 14},
+                "ema_fast": {"length": 12},
+                "ema_slow": {"length": 26},
+                "macd": {"fast": 12, "slow": 26, "signal": 9},
+                "atr": {"length": 14},
+                "ema_trend": {"fast": 20, "slow": 60},
+            }
+
+        profile: Dict[str, Any] = {
+            "sim": base_sim,
+            "risk": base_risk,
+            "strategy": strategy_defaults,
+            "indicators": indicator_defaults,
             "kline_cache": default_kcache,
         }
 
@@ -281,15 +301,15 @@ class RuntimeEngine:
             ctx: StrategyContext = data["ctx"]
             ctx.position = self._positions.get(sid)
             ctx.cooldown_bars_remaining = self._cooldowns.get(sid, 0)
-            strategy_cfg = self._profiles[sid]["strategy"]
-            ctx.trend_strength_min = float(strategy_cfg["trend_strength_min"])
-            ctx.atr_stop_mult = float(strategy_cfg["atr_stop_mult"])
-            ctx.cooldown_after_stop = int(strategy_cfg["cooldown_after_stop"])
-            ctx.rsi_long_lower = float(strategy_cfg["rsi_long_lower"])
-            ctx.rsi_long_upper = float(strategy_cfg["rsi_long_upper"])
-            ctx.rsi_short_upper = float(strategy_cfg["rsi_short_upper"])
-            ctx.rsi_short_lower = float(strategy_cfg["rsi_short_lower"])
-            ctx.rsi_slope_required = bool(strategy_cfg["rsi_slope_required"])
+            strategy_cfg = self._profiles[sid].get("strategy", {})
+            ctx.trend_strength_min = float(strategy_cfg.get("trend_strength_min", 0.0))
+            ctx.atr_stop_mult = float(strategy_cfg.get("atr_stop_mult", 1.0))
+            ctx.cooldown_after_stop = int(strategy_cfg.get("cooldown_after_stop", 0))
+            ctx.rsi_long_lower = float(strategy_cfg.get("rsi_long_lower", 50.0))
+            ctx.rsi_long_upper = float(strategy_cfg.get("rsi_long_upper", 60.0))
+            ctx.rsi_short_upper = float(strategy_cfg.get("rsi_short_upper", 50.0))
+            ctx.rsi_short_lower = float(strategy_cfg.get("rsi_short_lower", 40.0))
+            ctx.rsi_slope_required = bool(strategy_cfg.get("rsi_slope_required", False))
 
             conditions = strat.describe_conditions(
                 ctx=ctx,
