@@ -207,6 +207,8 @@ const applyStreamPayload = (payload) => {
   }
   if (payload.sig && payload.sig.t === 'cond') {
     conditions.value = payload.sig.c || { long: [], short: [] }
+  } else if (payload.cond) {
+    conditions.value = payload.cond || { long: [], short: [] }
   }
   if (payload.ev) {
     const evs = (payload.ev || []).filter(e => !e.sid || !currentStrategy.value || e.sid === currentStrategy.value)

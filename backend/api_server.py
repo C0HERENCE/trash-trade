@@ -228,6 +228,7 @@ def _stream_to_dict(s: StreamSnapshot, events: List[Dict[str, Any]], sid: Option
         "i15": s.indicators_15m,
         "i1": s.indicators_1h,
         "sig": sig,
+        "cond": cond,
         "ev": events,
     }
 
