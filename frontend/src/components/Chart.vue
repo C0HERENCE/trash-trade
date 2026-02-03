@@ -102,7 +102,8 @@ const loadIndicatorHistory = async () => {
     const items = data.items || []
     const overlays = (data.hints && data.hints.price_overlays) || []
 
-    // create series for each overlay field
+    // remove old series before recreating
+    overlaySeries.forEach(s => chart?.removeSeries(s.series))
     overlaySeries = overlays.map((name, idx) => ({
       name,
       series: chart?.addLineSeries({
@@ -157,7 +158,10 @@ const resetChartData = () => {
     candleSeries.setMarkers([])
     candleSeries.setData([])
   }
-  overlaySeries.forEach(s => s.series?.setData([]))
+  overlaySeries.forEach(s => {
+    s.series?.setData([])
+    chart?.removeSeries(s.series)
+  })
   overlaySeries = []
   clearLines()
 }

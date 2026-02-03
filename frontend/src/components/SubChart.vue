@@ -92,7 +92,10 @@ const resizeChart = () => {
 }
 
 const resetData = () => {
-  subSeries.forEach(s => s.series?.setData([]))
+  subSeries.forEach(s => {
+    s.series?.setData([])
+    chart?.removeSeries(s.series)
+  })
   subSeries = []
 }
 
