@@ -261,49 +261,18 @@ class MarketStateManager:
             ind1 = self.ind_1h_map.get(sid)
             if res_map is None or ind1 is None:
                 continue
-            ema_fast = res_map.get("ema_fast")
-            ema_slow = res_map.get("ema_slow")
-            rsi_res = res_map.get("rsi")
-            macd_res = res_map.get("macd_hist")
-            atr_res = res_map.get("atr")
-            if not ema_fast or not ema_slow:
-                continue
 
-            self.prev_ema20_15m[sid] = self.last_ema20_15m.get(sid)
-            self.prev_ema60_15m[sid] = self.last_ema60_15m.get(sid)
-            self.last_ema20_15m[sid] = ema_fast.value
-            self.last_ema60_15m[sid] = ema_slow.value
+            # build indicators/history dynamically from results
+            indicators_map = {name: res.value for name, res in res_map.items() if res is not None}
+            indicators_map.update(ind1)  # merge latest 1h values
+            indicators_map["close_15m"] = bar.close
 
-            # store 15m indicators for stream (use latest computed snapshot)
-            stream_updates["indicators_15m"] = {
-                "ema20": ema_fast.value if ema_fast else None,
-                "ema60": ema_slow.value if ema_slow else None,
-                "rsi14": rsi_res.value if rsi_res else None,
-                "macd_hist": macd_res.value if macd_res else None,
-                "atr14": atr_res.value if atr_res else None,
-            }
-
-            prev_rsi = self.last_rsi_15m.get(sid, rsi_res.value if rsi_res else 0.0)
-            prev_macd = self.prev_macd_hist_15m.get(sid, macd_res.value if macd_res else 0.0)
-            prev2_macd = self.prev2_macd_hist_15m.get(sid, macd_res.value if macd_res else 0.0)
-
-            indicators_map = {
-                "ema20_15m": ema_fast.value if ema_fast else None,
-                "ema60_15m": ema_slow.value if ema_slow else None,
-                "rsi14_15m": rsi_res.value if rsi_res else None,
-                "macd_hist_15m": macd_res.value if macd_res else None,
-                "atr14_15m": atr_res.value if atr_res else None,
-                "ema20_1h": ind1.ema20,
-                "ema60_1h": ind1.ema60,
-                "rsi14_1h": ind1.rsi14,
-                "close_1h": ind1.close,
-            }
             history_map = {
-                "rsi14_15m": [prev_rsi, rsi_res.value if rsi_res else None],
-                "macd_hist_15m": [prev2_macd, prev_macd, macd_res.value if macd_res else None],
-                "ema20_15m": [self.prev_ema20_15m.get(sid), ema_fast.value if ema_fast else None],
-                "ema60_15m": [self.prev_ema60_15m.get(sid), ema_slow.value if ema_slow else None],
+                name: res.history for name, res in res_map.items() if res is not None and res.history
             }
+
+            # store minimal stream snapshot (use full map for flexibility)
+            stream_updates["indicators_15m"] = indicators_map
 
             ctx = StrategyContext(
                 timestamp=bar.close_time,
@@ -319,9 +288,5 @@ class MarketStateManager:
                 cooldown_bars_remaining=0,  # runtime 填充
             )
             result[sid] = {"ctx": ctx, "indicators": stream_updates["indicators_15m"]}
-
-            self.last_rsi_15m[sid] = snap.rsi
-            self.prev2_macd_hist_15m[sid] = self.prev_macd_hist_15m.get(sid)
-            self.prev_macd_hist_15m[sid] = snap.macd_hist
 
         return {"stream": stream_updates, "strategies": result}
