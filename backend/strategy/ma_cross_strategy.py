@@ -69,38 +69,47 @@ class MaCrossStrategy(IStrategy):
 
         cond_long = []
         cond_short = []
-        prev_e20 = ctx.prev_ema20_15m if ctx.prev_ema20_15m is not None else ctx.ind_15m.ema20
-        prev_e60 = ctx.prev_ema60_15m if ctx.prev_ema60_15m is not None else ctx.ind_15m.ema60
+        ema20 = ctx.ind("ema20_15m", ctx.ind_15m.ema20 if ctx.ind_15m else None)
+        ema60 = ctx.ind("ema60_15m", ctx.ind_15m.ema60 if ctx.ind_15m else None)
+        prev_e20 = ctx.prev("ema20_15m", 1, ema20)
+        prev_e60 = ctx.prev("ema60_15m", 1, ema60)
         cond_long.append(
             item(
                 "15m EMA 多头",
-                ctx.ind_15m.ema20 > ctx.ind_15m.ema60,
-                info=f"ema20:{ctx.ind_15m.ema20:.2f}(prev:{prev_e20:.2f}), ema60:{ctx.ind_15m.ema60:.2f}(prev:{prev_e60:.2f}), 期望 ema20>ema60",
+                (ema20 or 0) > (ema60 or 0),
+                info=f"ema20:{ema20:.2f} (prev:{(prev_e20 or 0):.2f}), ema60:{ema60:.2f} (prev:{(prev_e60 or 0):.2f}), 期望 ema20>ema60",
             )
         )
         cond_short.append(
             item(
                 "15m EMA 空头",
-                ctx.ind_15m.ema20 < ctx.ind_15m.ema60,
-                info=f"ema20:{ctx.ind_15m.ema20:.2f}(prev:{prev_e20:.2f}), ema60:{ctx.ind_15m.ema60:.2f}(prev:{prev_e60:.2f}), 期望 ema20<ema60",
+                (ema20 or 0) < (ema60 or 0),
+                info=f"ema20:{ema20:.2f} (prev:{(prev_e20 or 0):.2f}), ema60:{ema60:.2f} (prev:{(prev_e60 or 0):.2f}), 期望 ema20<ema60",
             )
         )
-        cond_long.append(item("1h RSI 多头", ctx.ind_1h.rsi14 > 50, value=ctx.ind_1h.rsi14, target=">50"))
-        cond_short.append(item("1h RSI 空头", ctx.ind_1h.rsi14 < 50, value=ctx.ind_1h.rsi14, target="<50"))
-        cond_long.append(item("ATR 止损可用", ctx.atr14 is not None, value=ctx.atr14))
-        cond_short.append(item("ATR 止损可用", ctx.atr14 is not None, value=ctx.atr14))
+        rsi1h = ctx.ind("rsi14_1h", ctx.ind_1h.rsi14 if ctx.ind_1h else None)
+        atr15 = ctx.ind("atr14_15m", ctx.atr14)
+        cond_long.append(item("1h RSI 多头", (rsi1h or 0) > 50, value=rsi1h, target=">50"))
+        cond_short.append(item("1h RSI 空头", (rsi1h or 0) < 50, value=rsi1h, target="<50"))
+        cond_long.append(item("ATR 止损可用", atr15 is not None, value=atr15))
+        cond_short.append(item("ATR 止损可用", atr15 is not None, value=atr15))
         return {"long": cond_long, "short": cond_short}
 
     def on_state_restore(self, ctx: StrategyContext) -> None:
         return
 
     def on_bar_close(self, ctx: StrategyContext) -> EntrySignal | ExitAction | None:
+        ema20 = ctx.ind("ema20_15m", ctx.ind_15m.ema20 if ctx.ind_15m else None)
+        ema60 = ctx.ind("ema60_15m", ctx.ind_15m.ema60 if ctx.ind_15m else None)
+        rsi1h = ctx.ind("rsi14_1h", ctx.ind_1h.rsi14 if ctx.ind_1h else None)
+        atr15 = ctx.ind("atr14_15m", ctx.atr14)
+
         # exit on trend flip
         if ctx.position is not None:
             pos = ctx.position
-            if pos.side == "LONG" and ctx.ind_15m.ema20 < ctx.ind_15m.ema60:
+            if pos.side == "LONG" and (ema20 or 0) < (ema60 or 0):
                 return ExitAction(action="CLOSE_ALL", price=ctx.close_15m, reason="trend_flip")
-            if pos.side == "SHORT" and ctx.ind_15m.ema20 > ctx.ind_15m.ema60:
+            if pos.side == "SHORT" and (ema20 or 0) > (ema60 or 0):
                 return ExitAction(action="CLOSE_ALL", price=ctx.close_15m, reason="trend_flip")
             return None
 
@@ -108,27 +117,28 @@ class MaCrossStrategy(IStrategy):
             return None
 
         # Entry conditions
-        if ctx.ind_15m.ema20 > ctx.ind_15m.ema60 and ctx.ind_1h.rsi14 > 50:
-            entry = ctx.close_15m
-            stop = _choose_stop(entry, ctx.atr14, ctx.structure_stop, ctx.atr_stop_mult, "LONG")
-            tp1, tp2 = _calc_targets(entry, stop)
-            return EntrySignal(
-                side="LONG",
-                entry_price=entry,
-                stop_price=stop,
+        if ema20 is not None and ema60 is not None and rsi1h is not None:
+            if ema20 > ema60 and rsi1h > 50:
+                entry = ctx.close_15m
+                stop = _choose_stop(entry, atr15, ctx.structure_stop, ctx.atr_stop_mult, "LONG")
+                tp1, tp2 = _calc_targets(entry, stop)
+                return EntrySignal(
+                    side="LONG",
+                    entry_price=entry,
+                    stop_price=stop,
                 tp1_price=tp1,
                 tp2_price=tp2,
                 reason="ma_long",
             )
 
-        if ctx.ind_15m.ema20 < ctx.ind_15m.ema60 and ctx.ind_1h.rsi14 < 50:
-            entry = ctx.close_15m
-            stop = _choose_stop(entry, ctx.atr14, ctx.structure_stop, ctx.atr_stop_mult, "SHORT")
-            tp1, tp2 = _calc_targets(entry, stop)
-            return EntrySignal(
-                side="SHORT",
-                entry_price=entry,
-                stop_price=stop,
+            if ema20 < ema60 and rsi1h < 50:
+                entry = ctx.close_15m
+                stop = _choose_stop(entry, atr15, ctx.structure_stop, ctx.atr_stop_mult, "SHORT")
+                tp1, tp2 = _calc_targets(entry, stop)
+                return EntrySignal(
+                    side="SHORT",
+                    entry_price=entry,
+                    stop_price=stop,
                 tp1_price=tp1,
                 tp2_price=tp2,
                 reason="ma_short",
