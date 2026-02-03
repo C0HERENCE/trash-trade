@@ -127,6 +127,7 @@ class ApiConfig(BaseModel):
     port: int = 8000
     cors_allow_origins: List[str] = Field(default_factory=lambda: ["*"])
     ws_push_interval: str = "raw"  # "raw" or seconds number as string
+    ws_compress: bool = True  # when false, send JSON text instead of compressed msgpack
     base_path: str = ""
 
 

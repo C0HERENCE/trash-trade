@@ -159,6 +159,8 @@ const decodeMessage = async (data) => {
     const inflated = pako.inflate(buf)
     return msgpackDecode(inflated)
   } catch {
+    // maybe server sent plain msgpack without compression
+    try { return msgpackDecode(buf) } catch {}
     return null
   }
 }

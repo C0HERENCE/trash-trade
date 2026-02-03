@@ -642,8 +642,11 @@ async def ws_status(websocket: WebSocket) -> None:
             payload = _status_from_runtime(sid)
             if payload is None:
                 payload = await _status_from_db(sid)
-            payload = msgpack.packb(payload, use_bin_type=True)
-            await websocket.send_bytes(zlib.compress(payload))
+            if settings.api.ws_compress:
+                raw = msgpack.packb(payload, use_bin_type=True)
+                await websocket.send_bytes(zlib.compress(raw))
+            else:
+                await websocket.send_text(json.dumps(payload))
             if sleep_s is None:
                 # raw mode: wait for next loop tick, avoid tight spin
                 await asyncio.sleep(0.2)
@@ -676,8 +679,11 @@ async def ws_stream(websocket: WebSocket) -> None:
             filtered = [e for e in events if e.get("sid") in (None, sid)]
             stream_payload = _stream_to_dict(snap, filtered, sid)
             stream_payload["sid"] = sid
-            payload = msgpack.packb(stream_payload, use_bin_type=True)
-            await websocket.send_bytes(zlib.compress(payload))
+            if settings.api.ws_compress:
+                raw = msgpack.packb(stream_payload, use_bin_type=True)
+                await websocket.send_bytes(zlib.compress(raw))
+            else:
+                await websocket.send_text(json.dumps(stream_payload))
             if sleep_s is None:
                 await asyncio.sleep(0.2)
             else:
