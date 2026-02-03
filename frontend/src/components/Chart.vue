@@ -74,14 +74,6 @@ const loadHistory = async () => {
   }
 }
 
-const pick = (obj, keys, fallback = null) => {
-  if (!obj) return fallback
-  for (const k of keys) {
-    if (obj[k] !== undefined && obj[k] !== null) return obj[k]
-  }
-  return fallback
-}
-
 const loadIndicatorHistory = async () => {
   try {
     const res = await fetch(withStrategy(api('/api/indicator_history?interval=15m&limit=500')))

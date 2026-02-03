@@ -552,25 +552,16 @@ async def get_indicator_history(
                 "macd_hist": macd_res.value if macd_res else None,
             }
         )
-    # indicator hints for frontend rendering
+    # indicator hints for frontend rendering (purely derived from specs, no hardcoded names)
+    price_overlays = [
+        s for s in specs if getattr(s, "interval", None) == "15m" and s.__class__.__name__ == "EmaSpec"
+    ]
+    # sort EMA overlays by length if available, shortest first (fast then slow)
+    price_overlays.sort(key=lambda s: getattr(s, "length", 10**9))
     hints = {
-        "price_overlays": [],
-        "subchart": [],
+        "price_overlays": [s.name for s in price_overlays],
+        "subchart": [s.name for s in specs if getattr(s, "interval", None) == "15m" and s.__class__.__name__ != "EmaSpec"],
     }
-    # heuristic: price overlays = ema specs on 15m
-    ema_names = [s.name for s in specs if getattr(s, "interval", None) == "15m" and s.__class__.__name__ == "EmaSpec"]
-    if len(ema_names) >= 2:
-        hints["price_overlays"] = ema_names[:2]
-    else:
-        hints["price_overlays"] = ema_names
-    # subchart picks known names if present
-    for key in ["macd_hist_15m", "macd_hist", "rsi14_15m", "rsi14"]:
-        if any(s.name == key for s in specs):
-            hints["subchart"].append(key)
-    # fallback: first non-ema indicator on 15m
-    for s in specs:
-        if getattr(s, "interval", None) == "15m" and s.__class__.__name__ != "EmaSpec" and s.name not in hints["subchart"]:
-            hints["subchart"].append(s.name)
     return {"items": series, "hints": hints}
 
 
