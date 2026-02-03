@@ -197,8 +197,11 @@ class MarketStateManager:
         # per-strategy processing
         for sid, res_map in snaps.items():
             ind1 = self.ind_1h_map.get(sid)
-            if res_map is None or ind1 is None:
+            if res_map is None:
                 continue
+            if ind1 is None:
+                # allow describe_conditions to run even if 1h not ready
+                ind1 = {"ema20": None, "ema60": None, "rsi14": None, "close": bar.close}
 
             # build indicators/history dynamically from results
             indicators_map = {name: res.value for name, res in res_map.items() if res is not None}
