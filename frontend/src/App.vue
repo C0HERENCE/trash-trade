@@ -351,53 +351,6 @@ const handleStrategyChange = async (strategy) => {
   }
 }
 
-// ---------- dashboard ----------
-const dashboardItems = ref([])
-
-const loadDashboard = async () => {
-  try {
-    await loadStrategies()
-    const condRes = await fetch(api('/api/conditions_summary'))
-    const condData = await condRes.json()
-    const condMap = {}
-    ;(condData.items || []).forEach(it => { condMap[it.strategy] = it.conditions || { long: [], short: [] } })
-    const statusList = await Promise.all((strategies.value || []).map(async (s) => {
-      const res = await fetch(api(`/api/status?strategy=${encodeURIComponent(s.id)}`))
-      const st = await res.json()
-      return { id: s.id, status: st, cond: condMap[s.id] || { long: [], short: [] } }
-    }))
-    dashboardItems.value = statusList
-  } catch (e) {
-    console.error('loadDashboard failed', e)
-  }
-}
-
-const enterDetail = async (sid) => {
-  currentStrategy.value = sid
-  localStorage.setItem(STRATEGY_STORAGE_KEY, sid)
-  const url = new URL(window.location.href)
-  url.searchParams.set('strategy', sid)
-  window.history.replaceState({}, '', url.toString())
-  viewMode.value = 'detail'
-  loading.value = true
-  try {
-    await loadStatus()
-    await loadEquitySpark()
-    await loadTrades(0)
-    await loadLedger(0)
-    await loadStats()
-    connectWs()
-  } finally {
-    loading.value = false
-  }
-}
-
-const backToDashboard = async () => {
-  viewMode.value = 'dashboard'
-  stopStreams()
-  await loadDashboard()
-}
-
 onMounted(async () => {
   if ('scrollRestoration' in window.history) {
     window.history.scrollRestoration = 'manual'
