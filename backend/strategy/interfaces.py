@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Protocol, runtime_checkable, Dict, Any
 
 
@@ -33,6 +33,9 @@ class PositionState:
 
 @dataclass(slots=True)
 class StrategyContext:
+    # --- core context ---
+    timestamp: int = 0
+    interval: str = ""
     # latest prices
     price: float = 0.0
     close_15m: float = 0.0
@@ -67,6 +70,28 @@ class StrategyContext:
     rsi_short_upper: float = 0.0
     rsi_short_lower: float = 0.0
     rsi_slope_required: bool = False
+
+    # generic containers for extensibility
+    indicators: Dict[str, Any] = field(default_factory=dict)
+    features: Dict[str, Any] = field(default_factory=dict)
+    history: Dict[str, Any] = field(default_factory=dict)
+    meta: Dict[str, Any] = field(default_factory=dict)
+
+    # helper accessors
+    def ind(self, name: str, default=None):
+        return self.indicators.get(name, default)
+
+    def feat(self, name: str, default=None):
+        return self.features.get(name, default)
+
+    def prev(self, name: str, k: int = 1, default=None):
+        seq = self.history.get(name)
+        if seq is None or not isinstance(seq, (list, tuple)) or len(seq) < k:
+            return default
+        try:
+            return seq[-k]
+        except Exception:
+            return default
 
 
 @dataclass(slots=True)
