@@ -186,7 +186,14 @@ watch(() => props.kline, (k) => {
 })
 
 watch(() => props.indicators, (i) => {
-  if (!i || !props.kline || !overlaySeries.length) return
+  if (!i || !props.kline) return
+  if (!overlaySeries.length) {
+    const keys = Object.keys(i || {})
+    overlaySeries = keys.map((name, idx) => ({
+      name,
+      series: chart?.addLineSeries({ color: idx === 0 ? '#5cc8ff' : '#ffb86c', lineWidth: 1 })
+    }))
+  }
   const t = Math.floor(props.kline.t / 1000)
   overlaySeries.forEach(({ name, series }) => {
     const v = i[name]

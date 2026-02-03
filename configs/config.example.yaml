@@ -39,6 +39,14 @@ alerts:
     enabled: false
     webhook: ""
 
+api:
+  host: 0.0.0.0
+  port: 8000
+  cors_allow_origins: ["*"]
+  ws_push_interval: raw   # "raw" or seconds as string e.g. "1", "5"
+  ws_compress: true       # true=msgpack+zlib, false=plain JSON text
+  base_path: ""
+
 storage:
   sqlite_path: "./db/app.db"
 
@@ -48,6 +56,7 @@ api:
   cors_allow_origins: ["*"]
   ws_push_interval: "raw"
   base_path: ""
+  ws_compress: true
 
 frontend:
   static_path: "./frontend/dist"

@@ -99,7 +99,14 @@ watch(() => props.strategy, async () => {
 })
 
 watch(() => props.indicators, (i) => {
-  if (!i || !props.kline || !subSeries.length) return
+  if (!i || !props.kline) return
+  if (!subSeries.length) {
+    const keys = Object.keys(i || {})
+    subSeries = keys.map((name, idx) => ({
+      name,
+      series: chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 })
+    }))
+  }
   const t = Math.floor(props.kline.t / 1000)
   subSeries.forEach(({ name, series }) => {
     const v = i[name]

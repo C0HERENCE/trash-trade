@@ -46,6 +46,7 @@ api:
   host: "0.0.0.0"
   port: 8000
   cors_allow_origins: ["*"]
+  ws_compress: false
 
 frontend:
   static_path: "./frontend/dist"
