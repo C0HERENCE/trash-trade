@@ -8,7 +8,7 @@ const props = defineProps({
 
 const renderCondition = (condition) => {
   if (!condition || !condition.length) {
-    return '<div class="check ok"><span class="dot"></span>OK</div>'
+    return '<div class="check bad"><span class="dot"></span><span>暂无条件 / 等待下一根K线</span></div>'
   }
   return condition.map(c => {
     const cls = c.ok ? 'ok' : 'bad'

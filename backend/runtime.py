@@ -456,14 +456,9 @@ class RuntimeEngine:
 
         for sid, strat in self._strategies.items():
             strategy_cfg = self._profiles[sid]["strategy"]
-            prev_rsi = self._last_rsi_15m.get(sid)
-            prev_macd = self._prev_macd_hist_15m.get(sid)
-            prev2_macd = self._prev2_macd_hist_15m.get(sid)
-            if prev_rsi is None:
-                self._last_rsi_15m[sid] = snapshot.rsi14
-                self._prev_macd_hist_15m[sid] = snapshot.macd_hist
-                self._prev2_macd_hist_15m[sid] = snapshot.macd_hist
-                continue
+            prev_rsi = self._last_rsi_15m.get(sid, snapshot.rsi14)
+            prev_macd = self._prev_macd_hist_15m.get(sid, snapshot.macd_hist)
+            prev2_macd = self._prev2_macd_hist_15m.get(sid, snapshot.macd_hist)
 
             ctx = StrategyContext(
                 price=bar.close,
@@ -473,8 +468,8 @@ class RuntimeEngine:
                 ind_15m=ind_15m,
                 ind_1h=self._ind_1h,
                 prev_rsi_15m=prev_rsi,
-                prev_macd_hist_15m=prev_macd if prev_macd is not None else snapshot.macd_hist,
-                prev2_macd_hist_15m=prev2_macd if prev2_macd is not None else snapshot.macd_hist,
+                prev_macd_hist_15m=prev_macd,
+                prev2_macd_hist_15m=prev2_macd,
                 atr14=snapshot.atr14,
                 structure_stop=None,
                 position=self._positions.get(sid),
@@ -488,12 +483,6 @@ class RuntimeEngine:
                 rsi_short_lower=float(strategy_cfg["rsi_short_lower"]),
                 rsi_slope_required=bool(strategy_cfg["rsi_slope_required"]),
             )
-            signal = strat.on_bar_close(ctx)
-            if isinstance(signal, EntrySignal):
-                await self._open_position(sid, signal)
-            elif isinstance(signal, ExitAction):
-                await self._close_by_action(sid, signal)
-
             conditions = strat.describe_conditions(
                 ctx=ctx,
                 ind_1h_ready=self._ind_1h is not None,
@@ -501,6 +490,19 @@ class RuntimeEngine:
                 cooldown_bars=self._cooldowns.get(sid, 0),
             )
             await self._stream_store.update_snapshot(conditions={sid: conditions})
+
+            # skip trading until we have at least one prior bar for this strategy
+            if self._last_rsi_15m.get(sid) is None:
+                self._last_rsi_15m[sid] = snapshot.rsi14
+                self._prev_macd_hist_15m[sid] = snapshot.macd_hist
+                self._prev2_macd_hist_15m[sid] = snapshot.macd_hist
+                continue
+
+            signal = strat.on_bar_close(ctx)
+            if isinstance(signal, EntrySignal):
+                await self._open_position(sid, signal)
+            elif isinstance(signal, ExitAction):
+                await self._close_by_action(sid, signal)
 
             self._last_rsi_15m[sid] = snapshot.rsi14
             self._prev2_macd_hist_15m[sid] = self._prev_macd_hist_15m.get(sid)
