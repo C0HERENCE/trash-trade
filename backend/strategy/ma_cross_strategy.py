@@ -69,8 +69,8 @@ class MaCrossStrategy(IStrategy):
 
         cond_long = []
         cond_short = []
-        ema20 = ctx.ind("ema20_15m", ctx.ind_15m.ema20 if ctx.ind_15m else None)
-        ema60 = ctx.ind("ema60_15m", ctx.ind_15m.ema60 if ctx.ind_15m else None)
+        ema20 = ctx.ind("ema20_15m")
+        ema60 = ctx.ind("ema60_15m")
         prev_e20 = ctx.prev("ema20_15m", 1, ema20)
         prev_e60 = ctx.prev("ema60_15m", 1, ema60)
         cond_long.append(
@@ -87,8 +87,8 @@ class MaCrossStrategy(IStrategy):
                 info=f"ema20:{ema20:.2f} (prev:{(prev_e20 or 0):.2f}), ema60:{ema60:.2f} (prev:{(prev_e60 or 0):.2f}), 期望 ema20<ema60",
             )
         )
-        rsi1h = ctx.ind("rsi14_1h", ctx.ind_1h.rsi14 if ctx.ind_1h else None)
-        atr15 = ctx.ind("atr14_15m", ctx.atr14)
+        rsi1h = ctx.ind("rsi14_1h")
+        atr15 = ctx.ind("atr14_15m")
         cond_long.append(item("1h RSI 多头", (rsi1h or 0) > 50, value=rsi1h, target=">50"))
         cond_short.append(item("1h RSI 空头", (rsi1h or 0) < 50, value=rsi1h, target="<50"))
         cond_long.append(item("ATR 止损可用", atr15 is not None, value=atr15))
@@ -99,10 +99,10 @@ class MaCrossStrategy(IStrategy):
         return
 
     def on_bar_close(self, ctx: StrategyContext) -> EntrySignal | ExitAction | None:
-        ema20 = ctx.ind("ema20_15m", ctx.ind_15m.ema20 if ctx.ind_15m else None)
-        ema60 = ctx.ind("ema60_15m", ctx.ind_15m.ema60 if ctx.ind_15m else None)
-        rsi1h = ctx.ind("rsi14_1h", ctx.ind_1h.rsi14 if ctx.ind_1h else None)
-        atr15 = ctx.ind("atr14_15m", ctx.atr14)
+        ema20 = ctx.ind("ema20_15m")
+        ema60 = ctx.ind("ema60_15m")
+        rsi1h = ctx.ind("rsi14_1h")
+        atr15 = ctx.ind("atr14_15m")
 
         # exit on trend flip
         if ctx.position is not None:

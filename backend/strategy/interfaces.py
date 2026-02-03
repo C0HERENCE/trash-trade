@@ -42,19 +42,7 @@ class StrategyContext:
     low_15m: float = 0.0
     high_15m: float = 0.0
 
-    # indicators
-    ind_15m: Optional[Indicators15m] = None
-    ind_1h: Optional[Indicators1h] = None
-
-    # history for cross/sequence checks
-    prev_rsi_15m: Optional[float] = None
-    prev_macd_hist_15m: Optional[float] = None
-    prev2_macd_hist_15m: Optional[float] = None
-    prev_ema20_15m: Optional[float] = None
-    prev_ema60_15m: Optional[float] = None
-
-    # volatility / structure
-    atr14: Optional[float] = None
+    # structure (optional, set by higher layer if有)
     structure_stop: Optional[float] = None
 
     # position + cooldown

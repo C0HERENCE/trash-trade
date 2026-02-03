@@ -308,24 +308,11 @@ class MarketStateManager:
                 close_15m=bar.close,
                 low_15m=bar.low,
                 high_15m=bar.high,
-                ind_15m=Indicators15m(
-                    ema20=snap.ema_fast,
-                    ema60=snap.ema_slow,
-                    rsi14=snap.rsi or 0.0,
-                    macd_hist=snap.macd_hist or 0.0,
-                ),
-                ind_1h=ind1,
-                prev_rsi_15m=prev_rsi,
-                prev_macd_hist_15m=prev_macd,
-                prev2_macd_hist_15m=prev2_macd,
-                prev_ema20_15m=self.prev_ema20_15m.get(sid),
-                prev_ema60_15m=self.prev_ema60_15m.get(sid),
-                atr14=snap.atr or 0.0,
+                indicators=indicators_map,
+                history=history_map,
                 structure_stop=None,
                 position=None,  # runtime 填充
                 cooldown_bars_remaining=0,  # runtime 填充
-                indicators=indicators_map,
-                history=history_map,
             )
             result[sid] = {"ctx": ctx, "indicators": stream_updates["indicators_15m"]}
 
