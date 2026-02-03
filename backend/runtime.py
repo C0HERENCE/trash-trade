@@ -305,12 +305,20 @@ class RuntimeEngine:
             strategy_cfg = self._profiles[sid].get("strategy", {})
             ctx.meta["params"] = strategy_cfg
 
-            conditions = strat.describe_conditions(
-                ctx=ctx,
-                ind_1h_ready=self._state_mgr.ind_1h_map.get(sid) is not None,
-                has_position=self._positions.get(sid) is not None,
-                cooldown_bars=self._cooldowns.get(sid, 0),
-            )
+            try:
+                conditions = strat.describe_conditions(
+                    ctx=ctx,
+                    ind_1h_ready=self._state_mgr.ind_1h_map.get(sid) is not None,
+                    has_position=self._positions.get(sid) is not None,
+                    cooldown_bars=self._cooldowns.get(sid, 0),
+                )
+            except Exception as exc:
+                logger.exception("describe_conditions failed for %s", sid)
+                msg = f"error: {exc}"
+                conditions = {
+                    "long": [{"label": "条件计算异常", "ok": False, "info": msg}],
+                    "short": [{"label": "条件计算异常", "ok": False, "info": msg}],
+                }
             await self._stream_store.update_snapshot(conditions={sid: conditions})
 
             signal = strat.on_bar_close(ctx)
