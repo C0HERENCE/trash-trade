@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import load_settings
 from .db import Database
 from .indicators import IndicatorEngine
-from .marketdata.buffer import KlineBar, KlineBufferManager
+from .marketdata.buffer import KlineBar
 import msgpack
 
 
@@ -419,10 +419,26 @@ async def get_klines(
     return {"items": items}
 
 
+def _load_strategy_indicators(strategy_id: str) -> Dict[str, Any]:
+    for s in settings.strategies:
+        if s.id != strategy_id:
+            continue
+        if s.config_path:
+            p = Path(s.config_path)
+            if not p.is_absolute():
+                p = (Path.cwd() / p).resolve()
+            if p.exists():
+                loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict) and isinstance(loaded.get("indicators"), dict):
+                    return loaded["indicators"]
+    return {}
+
+
 @app.get("/api/indicator_history")
 async def get_indicator_history(
     interval: str = Query("15m"),
     limit: int = Query(500, ge=1, le=2000),
+    strategy: Optional[str] = Query(None),
 ) -> Dict[str, Any]:
     db = await _db()
     rows = await db.fetchall(
@@ -434,8 +450,16 @@ async def get_indicator_history(
     if not items:
         return {"items": []}
 
-    buf = KlineBufferManager({interval: len(items) + 5})
-    engine = IndicatorEngine(buf)
+    sid = strategy or DEFAULT_STRATEGY
+    ind_cfg = _load_strategy_indicators(sid)
+    ema_fast = ind_cfg.get("ema_fast", {}).get("length", 20)
+    ema_slow = ind_cfg.get("ema_slow", {}).get("length", 60)
+    rsi_len = ind_cfg.get("rsi", {}).get("length", 14)
+    macd_cfg = ind_cfg.get("macd", {"fast": 12, "slow": 26, "signal": 9})
+    atr_len = ind_cfg.get("atr", {}).get("length", 14)
+
+    req = {sid: {interval: {"ema": [ema_fast, ema_slow], "rsi": rsi_len, "macd": macd_cfg, "atr": atr_len}}}
+    engine = IndicatorEngine(req)
     series = []
     for r in items:
         bar = KlineBar(
@@ -450,16 +474,16 @@ async def get_indicator_history(
             is_closed=bool(r["is_closed"]),
             source=r["source"],
         )
-        buf.buffer(interval).append(bar)
-        snap = engine.update_on_close(interval, bar)
+        snap_map = engine.update_on_close(interval, bar)
+        snap = snap_map.get(sid)
         if snap is None:
             continue
         series.append(
             {
                 "time": int(r["open_time"]) // 1000,
-                "ema20": snap.ema20,
-                "ema60": snap.ema60,
-                "rsi14": snap.rsi14,
+                "ema20": snap.ema_fast,
+                "ema60": snap.ema_slow,
+                "rsi14": snap.rsi,
                 "macd_hist": snap.macd_hist,
             }
         )

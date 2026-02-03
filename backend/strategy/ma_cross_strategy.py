@@ -28,6 +28,33 @@ class MaCrossStrategy(IStrategy):
 
     id: str = "ma_cross"
 
+    def __init__(self) -> None:
+        self._profile = {}
+
+    def configure(self, profile: dict) -> None:
+        self._profile = profile or {}
+
+    def indicator_requirements(self) -> dict:
+        ind = (self._profile.get("indicators") or {})
+        ema_fast = ind.get("ema_fast", {}).get("length", 20)
+        ema_slow = ind.get("ema_slow", {}).get("length", 60)
+        ema_trend = ind.get("ema_trend", {})
+        trend_fast = ema_trend.get("fast", 20)
+        trend_slow = ema_trend.get("slow", 60)
+        rsi_len = ind.get("rsi", {}).get("length", 14)
+        atr_len = ind.get("atr", {}).get("length", 14)
+        return {
+            "15m": {"ema": [ema_fast, ema_slow], "atr": atr_len},
+            "1h": {"ema": [trend_fast, trend_slow], "rsi": rsi_len},
+        }
+
+    def warmup_policy(self) -> dict:
+        kc = (self._profile.get("kline_cache") or {})
+        return {
+            "15m": {"buffer_mult": kc.get("warmup_buffer_mult", 3.0), "extra": kc.get("warmup_extra_bars", 200)},
+            "1h": {"buffer_mult": kc.get("warmup_buffer_mult", 3.0), "extra": kc.get("warmup_extra_bars", 200)},
+        }
+
     def describe_conditions(self, ctx: StrategyContext, ind_1h_ready: bool, has_position: bool, cooldown_bars: int) -> dict:
         def item(label, ok, value=None, target=None, info=None):
             return {"label": label, "ok": ok, "value": value, "target": target, "info": info}

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol, runtime_checkable
+from typing import Optional, Protocol, runtime_checkable, Dict, Any
 
 
 @dataclass(slots=True)
@@ -91,6 +91,25 @@ class IStrategy(Protocol):
     """Strategy interface to allow multiple strategies to plug into runtime."""
 
     id: str
+
+    def configure(self, profile: Dict[str, Any]) -> None:
+        """Inject merged strategy profile (sim/risk/strategy/indicators/kline_cache)."""
+        ...
+
+    def indicator_requirements(self) -> Dict[str, Dict]:
+        """
+        Return per-interval indicator requirements, e.g.:
+        {"15m": {"ema": [20,60], "rsi": 14, "macd": {"fast":12,"slow":26,"signal":9}, "atr":14},
+         "1h": {"ema": [20,60], "rsi": 14}}
+        """
+        ...
+
+    def warmup_policy(self) -> Dict[str, Dict]:
+        """
+        Return per-interval warmup hints, e.g.:
+        {"15m": {"buffer_mult":3.0, "extra":200}, "1h": {"buffer_mult":3.0, "extra":200}}
+        """
+        ...
 
     def describe_conditions(
         self,

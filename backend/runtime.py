@@ -70,11 +70,12 @@ class RuntimeEngine:
         self._last_rsi_15m: dict[str, Optional[float]] = {}
         self._prev_macd_hist_15m: dict[str, Optional[float]] = {}
         self._prev2_macd_hist_15m: dict[str, Optional[float]] = {}
-        self._ind_1h: Optional[Indicators1h] = None
-        self._prev_ema20_15m: Optional[float] = None
-        self._prev_ema60_15m: Optional[float] = None
-        self._last_ema20_15m: Optional[float] = None
-        self._last_ema60_15m: Optional[float] = None
+        self._prev_ema20_15m: Dict[str, Optional[float]] = {}
+        self._prev_ema60_15m: Dict[str, Optional[float]] = {}
+        self._last_ema20_15m: Dict[str, Optional[float]] = {}
+        self._last_ema60_15m: Dict[str, Optional[float]] = {}
+        self._indicator_requirements: Dict[str, Dict[str, Dict]] = {}
+        self._ind_1h_map: Dict[str, Indicators1h] = {}
 
         self._last_price: float = 0.0
         self._ws_task: Optional[asyncio.Task] = None
@@ -160,6 +161,7 @@ class RuntimeEngine:
             self._strategies[s.id] = strat
             profile = self._build_strategy_profile(s)
             self._profiles[s.id] = profile
+            strat.configure(profile)
             init_cap = float(profile["sim"]["initial_capital"])
             self._accounts[s.id] = AccountState(
                 balance=init_cap,
@@ -194,7 +196,7 @@ class RuntimeEngine:
                 warmup_bars,
             )
 
-        self._indicators = IndicatorEngine(self._buffers)
+        self._indicators = IndicatorEngine(self._indicator_requirements)
 
         # Prime indicators and last-condition snapshot from history
         await self._prime_indicators_from_history()
@@ -232,16 +234,18 @@ class RuntimeEngine:
         if self._indicators is None or self._buffers is None:
             return
 
-        # Prime 1h indicators
+        # Prime 1h indicators per strategy
         bars_1h = self._buffers.buffer("1h").to_list()
         if bars_1h:
             for bar in bars_1h:
-                snap = self._indicators.update_on_close("1h", bar)
-                if snap is not None:
-                    self._ind_1h = Indicators1h(
-                        ema20=snap.ema20,
-                        ema60=snap.ema60,
-                        rsi14=snap.rsi14,
+                snaps = self._indicators.update_on_close("1h", bar)
+                for sid, snap in snaps.items():
+                    if snap.ema_fast is None or snap.ema_slow is None or snap.rsi is None:
+                        continue
+                    self._ind_1h_map[sid] = Indicators1h(
+                        ema20=snap.ema_fast,
+                        ema60=snap.ema_slow,
+                        rsi14=snap.rsi,
                         close=bar.close,
                     )
 
@@ -251,57 +255,59 @@ class RuntimeEngine:
         last_snap_15m = None
         for bar in bars_15m:
             last_bar_15m = bar
-            snap = self._indicators.update_on_close("15m", bar)
-            if snap is None:
-                continue
-            if snap.macd_hist is None or snap.atr14 is None:
-                continue
-            last_snap_15m = snap
-            for sid in self._strategies.keys():
+            snaps = self._indicators.update_on_close("15m", bar)
+            for sid, snap in snaps.items():
+                if snap.ema_fast is None or snap.ema_slow is None:
+                    continue
+                self._prev_ema20_15m[sid] = self._last_ema20_15m.get(sid)
+                self._prev_ema60_15m[sid] = self._last_ema60_15m.get(sid)
+                self._last_ema20_15m[sid] = snap.ema_fast
+                self._last_ema60_15m[sid] = snap.ema_slow
+
+                last_snap_15m = snap
                 if self._last_rsi_15m.get(sid) is None:
-                    self._last_rsi_15m[sid] = snap.rsi14
+                    self._last_rsi_15m[sid] = snap.rsi
                     self._prev_macd_hist_15m[sid] = snap.macd_hist
                     self._prev2_macd_hist_15m[sid] = snap.macd_hist
                 else:
                     self._prev2_macd_hist_15m[sid] = self._prev_macd_hist_15m[sid]
                     self._prev_macd_hist_15m[sid] = snap.macd_hist
-                    self._last_rsi_15m[sid] = snap.rsi14
+                    self._last_rsi_15m[sid] = snap.rsi
 
         # Push initial snapshots for frontend
         if last_bar_15m is not None:
             await self._stream_store.update_snapshot(
                 kline_15m={
-                    "t": last_bar_15m.open_time,
-                    "T": last_bar_15m.close_time,
-                    "o": last_bar_15m.open,
-                    "h": last_bar_15m.high,
-                    "l": last_bar_15m.low,
-                    "c": last_bar_15m.close,
-                    "v": last_bar_15m.volume,
-                    "x": last_bar_15m.is_closed,
+                    t: last_bar_15m.open_time,
+                    T: last_bar_15m.close_time,
+                    o: last_bar_15m.open,
+                    h: last_bar_15m.high,
+                    l: last_bar_15m.low,
+                    c: last_bar_15m.close,
+                    v: last_bar_15m.volume,
+                    x: last_bar_15m.is_closed,
                 }
             )
         if last_snap_15m is not None:
             await self._stream_store.update_snapshot(
                 indicators_15m={
-                    "ema20": last_snap_15m.ema20,
-                    "ema60": last_snap_15m.ema60,
-                    "rsi14": last_snap_15m.rsi14,
-                    "macd_hist": last_snap_15m.macd_hist,
-                    "atr14": last_snap_15m.atr14,
+                    ema20: last_snap_15m.ema_fast,
+                    ema60: last_snap_15m.ema_slow,
+                    rsi14: last_snap_15m.rsi,
+                    macd_hist: last_snap_15m.macd_hist,
+                    atr14: last_snap_15m.atr,
                 }
             )
-            # conditions are emitted per-strategy on realtime/close callbacks
-        if self._ind_1h is not None:
+        first = next(iter(self._ind_1h_map.values()), None)
+        if first is not None:
             await self._stream_store.update_snapshot(
                 indicators_1h={
-                    "ema20": self._ind_1h.ema20,
-                    "ema60": self._ind_1h.ema60,
-                    "rsi14": self._ind_1h.rsi14,
-                    "close": self._ind_1h.close,
+                    ema20: first.ema20,
+                    ema60: first.ema60,
+                    rsi14: first.rsi14,
+                    close: first.close,
                 }
             )
-
     def _compute_warmup_bars(self) -> tuple[Dict[str, int], Dict[str, int]]:
         """
         Aggregate all strategies' indicator需求，得到:
@@ -311,21 +317,31 @@ class RuntimeEngine:
         intervals = ["15m", "1h"]
         warmup: Dict[str, int] = {i: 0 for i in intervals}
         maxlen: Dict[str, int] = {i: 0 for i in intervals}
+        self._indicator_requirements: Dict[str, Dict[str, Dict]] = {}
 
-        for sid, profile in self._profiles.items():
-            ind = profile.get("indicators", {})
-            kc = profile.get("kline_cache", {})
+        for sid, strat in self._strategies.items():
+            req = strat.indicator_requirements()
+            self._indicator_requirements[sid] = req
+            kc = self._profiles[sid].get("kline_cache", {})
+            wp = strat.warmup_policy() or {}
 
-            ema_fast = ind.get("ema_fast", {}).get("length", 12)
-            ema_slow = ind.get("ema_slow", {}).get("length", 26)
-            macd_cfg = ind.get("macd", {})
-            macd_fast = macd_cfg.get("fast", ema_fast)
-            macd_slow = macd_cfg.get("slow", ema_slow)
+            req_15 = req.get("15m", {})
+            req_1h = req.get("1h", {})
+
+            ema_vals = req_15.get("ema", [20, 60])
+            ema_fast = ema_vals[0] if len(ema_vals) > 0 else 20
+            ema_slow = ema_vals[1] if len(ema_vals) > 1 else 60
+            rsi_len = req_15.get("rsi", 14)
+            macd_cfg = req_15.get("macd", {"fast": 12, "slow": 26, "signal": 9})
+            macd_fast = macd_cfg.get("fast", 12)
+            macd_slow = macd_cfg.get("slow", 26)
             macd_signal = macd_cfg.get("signal", 9)
-            atr_len = ind.get("atr", {}).get("length", 14)
-            rsi_len = ind.get("rsi", {}).get("length", 14)
-            trend_fast = ind.get("ema_trend", {}).get("fast", 20)
-            trend_slow = ind.get("ema_trend", {}).get("slow", 60)
+            atr_len = req_15.get("atr", 14)
+
+            trend_ema = req_1h.get("ema", [20, 60])
+            trend_fast = trend_ema[0] if len(trend_ema) > 0 else 20
+            trend_slow = trend_ema[1] if len(trend_ema) > 1 else 60
+            rsi_len_1h = req_1h.get("rsi", 14)
 
             min_15m = compute_min_bars(
                 ema_fast=ema_fast,
@@ -336,12 +352,16 @@ class RuntimeEngine:
                 macd_signal=macd_signal,
                 atr=atr_len,
             )
-            min_1h = max(trend_slow, trend_fast, rsi_len + 1)
+            min_1h = max(trend_slow, trend_fast, rsi_len_1h + 1)
 
-            buf_mult = kc.get("warmup_buffer_mult", 3.0)
-            extra = kc.get("warmup_extra_bars", 200)
+            wp15 = wp.get("15m", {})
+            wp1 = wp.get("1h", {})
+            buf_mult = wp15.get("buffer_mult", kc.get("warmup_buffer_mult", 3.0))
+            extra = wp15.get("extra", kc.get("warmup_extra_bars", 200))
             bars_15m = compute_warmup_bars(min_15m, buf_mult, extra)
-            bars_1h = compute_warmup_bars(min_1h, buf_mult, extra)
+            buf_mult_1h = wp1.get("buffer_mult", kc.get("warmup_buffer_mult", 3.0))
+            extra_1h = wp1.get("extra", kc.get("warmup_extra_bars", 200))
+            bars_1h = compute_warmup_bars(min_1h, buf_mult_1h, extra_1h)
 
             warmup["15m"] = max(warmup["15m"], bars_15m)
             warmup["1h"] = max(warmup["1h"], bars_1h)
@@ -416,96 +436,103 @@ class RuntimeEngine:
     async def _on_kline_close(self, interval: str, bar: KlineBar) -> None:
         if self._indicators is None:
             return
-        snapshot = self._indicators.update_on_close(interval, bar)
-        if snapshot is None:
-            return
+        snapshots = self._indicators.update_on_close(interval, bar)
 
         if interval == "1h":
-            self._ind_1h = Indicators1h(
-                ema20=snapshot.ema20,
-                ema60=snapshot.ema60,
-                rsi14=snapshot.rsi14,
-                close=bar.close,
-            )
-            await self._stream_store.update_snapshot(
-                indicators_1h={
-                    "ema20": snapshot.ema20,
-                    "ema60": snapshot.ema60,
-                    "rsi14": snapshot.rsi14,
-                    "close": bar.close,
-                }
-            )
+            for sid, snap in snapshots.items():
+                if snap.ema_fast is None or snap.ema_slow is None or snap.rsi is None:
+                    continue
+                self._ind_1h_map[sid] = Indicators1h(
+                    ema20=snap.ema_fast,
+                    ema60=snap.ema_slow,
+                    rsi14=snap.rsi,
+                    close=bar.close,
+                )
+            first = next(iter(self._ind_1h_map.values()), None)
+            if first:
+                await self._stream_store.update_snapshot(
+                    indicators_1h={
+                        ema20: first.ema20,
+                        ema60: first.ema60,
+                        rsi14: first.rsi14,
+                        close: first.close,
+                    }
+                )
             return
 
-        if interval != "15m" or self._ind_1h is None:
+        if interval != "15m":
             return
-        if snapshot.macd_hist is None or snapshot.atr14 is None:
-            return
-
-        ind_15m = Indicators15m(
-            ema20=snapshot.ema20,
-            ema60=snapshot.ema60,
-            rsi14=snapshot.rsi14,
-            macd_hist=snapshot.macd_hist,
-        )
-        self._prev_ema20_15m = self._last_ema20_15m
-        self._prev_ema60_15m = self._last_ema60_15m
-        self._last_ema20_15m = snapshot.ema20
-        self._last_ema60_15m = snapshot.ema60
-        await self._stream_store.update_snapshot(
-            indicators_15m={
-                "ema20": snapshot.ema20,
-                "ema60": snapshot.ema60,
-                "rsi14": snapshot.rsi14,
-                "macd_hist": snapshot.macd_hist,
-                "atr14": snapshot.atr14,
-            }
-        )
 
         for sid, strat in self._strategies.items():
-            strategy_cfg = self._profiles[sid]["strategy"]
-            prev_rsi = self._last_rsi_15m.get(sid, snapshot.rsi14)
-            prev_macd = self._prev_macd_hist_15m.get(sid, snapshot.macd_hist)
-            prev2_macd = self._prev2_macd_hist_15m.get(sid, snapshot.macd_hist)
+            snap = snapshots.get(sid)
+            ind1 = self._ind_1h_map.get(sid)
+            if snap is None or ind1 is None:
+                continue
+            if snap.ema_fast is None or snap.ema_slow is None:
+                continue
+
+            self._prev_ema20_15m[sid] = self._last_ema20_15m.get(sid)
+            self._prev_ema60_15m[sid] = self._last_ema60_15m.get(sid)
+            self._last_ema20_15m[sid] = snap.ema_fast
+            self._last_ema60_15m[sid] = snap.ema_slow
+
+            await self._stream_store.update_snapshot(
+                indicators_15m={
+                    ema20: snap.ema_fast,
+                    ema60: snap.ema_slow,
+                    rsi14: snap.rsi,
+                    macd_hist: snap.macd_hist,
+                    atr14: snap.atr,
+                }
+            )
+
+            strategy_cfg = self._profiles[sid][strategy]
+            prev_rsi = self._last_rsi_15m.get(sid, snap.rsi or 0.0)
+            prev_macd = self._prev_macd_hist_15m.get(sid, snap.macd_hist or 0.0)
+            prev2_macd = self._prev2_macd_hist_15m.get(sid, snap.macd_hist or 0.0)
 
             ctx = StrategyContext(
                 price=bar.close,
                 close_15m=bar.close,
                 low_15m=bar.low,
                 high_15m=bar.high,
-                ind_15m=ind_15m,
-                ind_1h=self._ind_1h,
+                ind_15m=Indicators15m(
+                    ema20=snap.ema_fast,
+                    ema60=snap.ema_slow,
+                    rsi14=snap.rsi or 0.0,
+                    macd_hist=snap.macd_hist or 0.0,
+                ),
+                ind_1h=ind1,
                 prev_rsi_15m=prev_rsi,
                 prev_macd_hist_15m=prev_macd,
                 prev2_macd_hist_15m=prev2_macd,
-                prev_ema20_15m=self._prev_ema20_15m,
-                prev_ema60_15m=self._prev_ema60_15m,
-                atr14=snapshot.atr14,
+                prev_ema20_15m=self._prev_ema20_15m.get(sid),
+                prev_ema60_15m=self._prev_ema60_15m.get(sid),
+                atr14=snap.atr or 0.0,
                 structure_stop=None,
                 position=self._positions.get(sid),
                 cooldown_bars_remaining=self._cooldowns.get(sid, 0),
-                trend_strength_min=float(strategy_cfg["trend_strength_min"]),
-                atr_stop_mult=float(strategy_cfg["atr_stop_mult"]),
-                cooldown_after_stop=int(strategy_cfg["cooldown_after_stop"]),
-                rsi_long_lower=float(strategy_cfg["rsi_long_lower"]),
-                rsi_long_upper=float(strategy_cfg["rsi_long_upper"]),
-                rsi_short_upper=float(strategy_cfg["rsi_short_upper"]),
-                rsi_short_lower=float(strategy_cfg["rsi_short_lower"]),
-                rsi_slope_required=bool(strategy_cfg["rsi_slope_required"]),
+                trend_strength_min=float(strategy_cfg[trend_strength_min]),
+                atr_stop_mult=float(strategy_cfg[atr_stop_mult]),
+                cooldown_after_stop=int(strategy_cfg[cooldown_after_stop]),
+                rsi_long_lower=float(strategy_cfg[rsi_long_lower]),
+                rsi_long_upper=float(strategy_cfg[rsi_long_upper]),
+                rsi_short_upper=float(strategy_cfg[rsi_short_upper]),
+                rsi_short_lower=float(strategy_cfg[rsi_short_lower]),
+                rsi_slope_required=bool(strategy_cfg[rsi_slope_required]),
             )
             conditions = strat.describe_conditions(
                 ctx=ctx,
-                ind_1h_ready=self._ind_1h is not None,
+                ind_1h_ready=self._ind_1h_map.get(sid) is not None,
                 has_position=self._positions.get(sid) is not None,
                 cooldown_bars=self._cooldowns.get(sid, 0),
             )
             await self._stream_store.update_snapshot(conditions={sid: conditions})
 
-            # skip trading until we have at least one prior bar for this strategy
             if self._last_rsi_15m.get(sid) is None:
-                self._last_rsi_15m[sid] = snapshot.rsi14
-                self._prev_macd_hist_15m[sid] = snapshot.macd_hist
-                self._prev2_macd_hist_15m[sid] = snapshot.macd_hist
+                self._last_rsi_15m[sid] = snap.rsi
+                self._prev_macd_hist_15m[sid] = snap.macd_hist
+                self._prev2_macd_hist_15m[sid] = snap.macd_hist
                 continue
 
             signal = strat.on_bar_close(ctx)
@@ -514,15 +541,14 @@ class RuntimeEngine:
             elif isinstance(signal, ExitAction):
                 await self._close_by_action(sid, signal)
 
-            self._last_rsi_15m[sid] = snapshot.rsi14
+            self._last_rsi_15m[sid] = snap.rsi
             self._prev2_macd_hist_15m[sid] = self._prev_macd_hist_15m.get(sid)
-            self._prev_macd_hist_15m[sid] = snapshot.macd_hist
+            self._prev_macd_hist_15m[sid] = snap.macd_hist
             if self._cooldowns.get(sid, 0) > 0:
-                self._cooldowns[sid] = max(0, self._cooldowns[sid] - 1)
+                self._cooldowns[sid] = max(0, self._cooldowns.get(sid, 0) - 1)
 
         await self._update_status(bar.close)
         await self._snapshot_equity()
-
     def _calc_realized_pnl(self, pos: PositionState, price: float, qty: float) -> float:
         if pos.side == "LONG":
             return (price - pos.entry_price) * qty
