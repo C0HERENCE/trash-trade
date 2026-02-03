@@ -50,53 +50,34 @@ class MarketStateManager:
         intervals = ["15m", "1h"]
         warmup: Dict[str, int] = {i: 0 for i in intervals}
         maxlen: Dict[str, int] = {i: 0 for i in intervals}
-        self.indicator_requirements = {}
+        self.indicator_specs = {}
+        self.indicator_requirements = {}  # keep legacy for backward compat export
 
         for sid, strat in strategies.items():
             req = strat.indicator_requirements() or {}
-            self.indicator_requirements[sid] = req
+            # If new-style list, use directly; else convert
+            if isinstance(req, list):
+                specs = req
+            else:
+                self.indicator_requirements[sid] = req
+                specs = build_specs_from_legacy({sid: req}).get(sid, [])
+            self.indicator_specs[sid] = specs
+
             kc = profiles[sid].get("kline_cache", {}) if sid in profiles else {}
             wp = strat.warmup_policy() or {}
 
-            # 15m需求
-            req_15 = req.get("15m", {})
-            ema_vals = req_15.get("ema", [20, 60])
-            ema_fast = ema_vals[0] if len(ema_vals) > 0 else 20
-            ema_slow = ema_vals[1] if len(ema_vals) > 1 else 60
-            rsi_len = req_15.get("rsi", 14)
-            macd_cfg = req_15.get("macd", {"fast": 12, "slow": 26, "signal": 9})
-            macd_fast = macd_cfg.get("fast", 12)
-            macd_slow = macd_cfg.get("slow", 26)
-            macd_signal = macd_cfg.get("signal", 9)
-            atr_len = req_15.get("atr", 14)
+            # compute warmup per interval
+            per_interval: Dict[str, int] = {i: 0 for i in intervals}
+            for spec in specs:
+                per_interval[spec.interval] = max(per_interval.get(spec.interval, 0), spec.warmup_bars)
 
-            # 1h需求
-            req_1h = req.get("1h", {})
-            trend_ema = req_1h.get("ema", [20, 60])
-            trend_fast = trend_ema[0] if len(trend_ema) > 0 else 20
-            trend_slow = trend_ema[1] if len(trend_ema) > 1 else 60
-            rsi_len_1h = req_1h.get("rsi", 14)
+            buf_mult_15 = wp.get("15m", {}).get("buffer_mult", kc.get("warmup_buffer_mult", 3.0))
+            extra_15 = wp.get("15m", {}).get("extra", kc.get("warmup_extra_bars", 200))
+            buf_mult_1h = wp.get("1h", {}).get("buffer_mult", kc.get("warmup_buffer_mult", 3.0))
+            extra_1h = wp.get("1h", {}).get("extra", kc.get("warmup_extra_bars", 200))
 
-            min_15m = compute_min_bars(
-                ema_fast=ema_fast,
-                ema_slow=ema_slow,
-                rsi=rsi_len,
-                macd_fast=macd_fast,
-                macd_slow=macd_slow,
-                macd_signal=macd_signal,
-                atr=atr_len,
-            )
-            min_1h = max(trend_slow, trend_fast, rsi_len_1h + 1)
-
-            wp15 = wp.get("15m", {})
-            wp1 = wp.get("1h", {})
-            buf_mult_15 = wp15.get("buffer_mult", kc.get("warmup_buffer_mult", 3.0))
-            extra_15 = wp15.get("extra", kc.get("warmup_extra_bars", 200))
-            buf_mult_1h = wp1.get("buffer_mult", kc.get("warmup_buffer_mult", 3.0))
-            extra_1h = wp1.get("extra", kc.get("warmup_extra_bars", 200))
-
-            bars_15m = compute_warmup_bars(min_15m, buf_mult_15, extra_15)
-            bars_1h = compute_warmup_bars(min_1h, buf_mult_1h, extra_1h)
+            bars_15m = compute_warmup_bars(per_interval["15m"], buf_mult_15, extra_15)
+            bars_1h = compute_warmup_bars(per_interval["1h"], buf_mult_1h, extra_1h)
 
             warmup["15m"] = max(warmup["15m"], bars_15m)
             warmup["1h"] = max(warmup["1h"], bars_1h)

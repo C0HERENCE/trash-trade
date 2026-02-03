@@ -73,6 +73,8 @@ class TestStrategy(IStrategy):
         self._profile = profile or {}
 
     def indicator_requirements(self) -> dict:
+        from ..indicators import EmaSpec, RsiSpec, MacdSpec, AtrSpec
+
         ind = (self._profile.get("indicators") or {})
         ema_fast = ind.get("ema_fast", {}).get("length", 20)
         ema_slow = ind.get("ema_slow", {}).get("length", 60)
@@ -82,10 +84,23 @@ class TestStrategy(IStrategy):
         rsi_len = ind.get("rsi", {}).get("length", 14)
         macd_cfg = ind.get("macd", {"fast": 12, "slow": 26, "signal": 9})
         atr_len = ind.get("atr", {}).get("length", 14)
-        return {
-            "15m": {"ema": [ema_fast, ema_slow], "rsi": rsi_len, "macd": macd_cfg, "atr": atr_len},
-            "1h": {"ema": [trend_fast, trend_slow], "rsi": rsi_len},
-        }
+
+        return [
+            EmaSpec(name="ema20_15m", interval="15m", length=ema_fast),
+            EmaSpec(name="ema60_15m", interval="15m", length=ema_slow),
+            RsiSpec(name="rsi14_15m", interval="15m", length=rsi_len),
+            MacdSpec(
+                name="macd_hist_15m",
+                interval="15m",
+                fast=macd_cfg.get("fast", 12),
+                slow=macd_cfg.get("slow", 26),
+                signal=macd_cfg.get("signal", 9),
+            ),
+            AtrSpec(name="atr14_15m", interval="15m", length=atr_len),
+            EmaSpec(name="ema20_1h", interval="1h", length=trend_fast),
+            EmaSpec(name="ema60_1h", interval="1h", length=trend_slow),
+            RsiSpec(name="rsi14_1h", interval="1h", length=rsi_len),
+        ]
 
     def warmup_policy(self) -> dict:
         kc = (self._profile.get("kline_cache") or {})

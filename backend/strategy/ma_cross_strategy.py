@@ -35,6 +35,8 @@ class MaCrossStrategy(IStrategy):
         self._profile = profile or {}
 
     def indicator_requirements(self) -> dict:
+        from ..indicators import EmaSpec, RsiSpec, AtrSpec
+
         ind = (self._profile.get("indicators") or {})
         ema_fast = ind.get("ema_fast", {}).get("length", 20)
         ema_slow = ind.get("ema_slow", {}).get("length", 60)
@@ -43,10 +45,14 @@ class MaCrossStrategy(IStrategy):
         trend_slow = ema_trend.get("slow", 60)
         rsi_len = ind.get("rsi", {}).get("length", 14)
         atr_len = ind.get("atr", {}).get("length", 14)
-        return {
-            "15m": {"ema": [ema_fast, ema_slow], "atr": atr_len},
-            "1h": {"ema": [trend_fast, trend_slow], "rsi": rsi_len},
-        }
+        return [
+            EmaSpec(name="ema20_15m", interval="15m", length=ema_fast),
+            EmaSpec(name="ema60_15m", interval="15m", length=ema_slow),
+            AtrSpec(name="atr14_15m", interval="15m", length=atr_len),
+            EmaSpec(name="ema20_1h", interval="1h", length=trend_fast),
+            EmaSpec(name="ema60_1h", interval="1h", length=trend_slow),
+            RsiSpec(name="rsi14_1h", interval="1h", length=rsi_len),
+        ]
 
     def warmup_policy(self) -> dict:
         kc = (self._profile.get("kline_cache") or {})

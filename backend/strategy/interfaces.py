@@ -102,11 +102,10 @@ class IStrategy(Protocol):
         """Inject merged strategy profile (sim/risk/strategy/indicators/kline_cache)."""
         ...
 
-    def indicator_requirements(self) -> Dict[str, Dict]:
+    def indicator_requirements(self):
         """
-        Return per-interval indicator requirements, e.g.:
-        {"15m": {"ema": [20,60], "rsi": 14, "macd": {"fast":12,"slow":26,"signal":9}, "atr":14},
-         "1h": {"ema": [20,60], "rsi": 14}}
+        Return indicator requirements. New preferred form: list[IIndicatorSpec].
+        Legacy form (dict) is still accepted and auto-converted.
         """
         ...
 
