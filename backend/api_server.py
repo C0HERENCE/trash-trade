@@ -51,6 +51,7 @@ class StreamSnapshot:
     indicators_15m: Optional[Dict[str, Any]]
     indicators_1h: Optional[Dict[str, Any]]
     last_signal: Optional[Dict[str, Any]]
+    conditions: Dict[str, Dict[str, Any]]
 
 
 class StatusStore:
@@ -94,6 +95,7 @@ class StreamStore:
             indicators_15m=None,
             indicators_1h=None,
             last_signal=None,
+            conditions={},
         )
         self._events: Deque[Dict[str, Any]] = deque(maxlen=500)
 
@@ -103,6 +105,7 @@ class StreamStore:
         indicators_15m: Optional[Dict[str, Any]] = None,
         indicators_1h: Optional[Dict[str, Any]] = None,
         last_signal: Optional[Dict[str, Any]] = None,
+        conditions: Optional[Dict[str, Any]] = None,
     ) -> None:
         async with self._lock:
             if kline_15m is not None:
@@ -113,6 +116,8 @@ class StreamStore:
                 self._snapshot.indicators_1h = indicators_1h
             if last_signal is not None:
                 self._snapshot.last_signal = last_signal
+            if conditions is not None and isinstance(conditions, dict):
+                self._snapshot.conditions.update(conditions)
             self._snapshot.ts = int(time.time() * 1000)
 
     async def add_event(self, event: Dict[str, Any]) -> None:
@@ -207,14 +212,22 @@ def _status_to_dict(s: RuntimeStatus) -> Dict[str, Any]:
     }
 
 
-def _stream_to_dict(s: StreamSnapshot, events: List[Dict[str, Any]]) -> Dict[str, Any]:
+def _stream_to_dict(s: StreamSnapshot, events: List[Dict[str, Any]], sid: Optional[str]) -> Dict[str, Any]:
     # Use short keys to reduce payload size
+    cond = None
+    if sid and s.conditions:
+        cond = s.conditions.get(sid)
+    sig = None
+    if cond is not None:
+        sig = {"t": "cond", "sid": sid, "c": cond}
+    elif s.last_signal is not None:
+        sig = s.last_signal
     return {
         "ts": s.ts,
         "k": s.kline_15m,
         "i15": s.indicators_15m,
         "i1": s.indicators_1h,
-        "sig": s.last_signal,
+        "sig": sig,
         "ev": events,
     }
 
@@ -498,7 +511,7 @@ async def debug_state(alert: bool = False) -> Dict[str, Any]:
 
     state = {
         "status": _status_to_dict(s),
-        "stream_snapshot": _stream_to_dict(snap, events),
+        "stream_snapshot": _stream_to_dict(snap, events, None),
         "ws": ws_info,
         "runtime": runtime_state,
         "db": {
@@ -561,9 +574,7 @@ async def ws_stream(websocket: WebSocket) -> None:
             snap = await stream_store.get_snapshot()
             events = await stream_store.get_events(limit=50)
             filtered = [e for e in events if e.get("sid") in (None, sid)]
-            stream_payload = _stream_to_dict(snap, filtered)
-            if stream_payload.get("sig") and stream_payload["sig"].get("sid") not in (None, sid):
-                stream_payload["sig"] = None
+            stream_payload = _stream_to_dict(snap, filtered, sid)
             stream_payload["sid"] = sid
             payload = msgpack.packb(stream_payload, use_bin_type=True)
             await websocket.send_bytes(zlib.compress(payload))

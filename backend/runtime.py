@@ -501,7 +501,7 @@ class RuntimeEngine:
                 has_position=self._positions.get(sid) is not None,
                 cooldown_bars=self._cooldowns.get(sid, 0),
             )
-            await self._stream_store.update_snapshot(last_signal={"t": "cond", "sid": sid, "c": conditions})
+            await self._stream_store.update_snapshot(conditions={sid: conditions})
 
             self._last_rsi_15m[sid] = snapshot.rsi14
             self._prev2_macd_hist_15m[sid] = self._prev_macd_hist_15m.get(sid)
