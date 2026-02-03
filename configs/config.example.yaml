@@ -24,12 +24,6 @@ strategies:
     type: ma_cross
     config_path: "./configs/strategies/dual_ma_test.ma_cross.yaml"
 
-kline_cache:
-  max_bars_15m: 2000
-  max_bars_1h: 2000
-  warmup_extra_bars: 200
-  warmup_buffer_mult: 3.0
-
 alerts:
   enabled: true
   dedup_ttl_ms: 300000

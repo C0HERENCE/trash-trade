@@ -110,9 +110,10 @@ trash-trade/
 ## 配置参数说明（已拆分）
 
 ### 1) 全局配置：`configs/config.yaml`
-建议只保留共享内容：
-- `app` / `binance` / `kline_cache` / `alerts` / `storage` / `api` / `frontend`
+仅放**共享基础设施**：
+- `app` / `binance` / `alerts` / `storage` / `api` / `frontend`
 - `strategies`：策略实例列表（id/type/config_path）
+> 不再在全局里放指标、策略参数、kline 缓存；这些都属于策略私有。
 
 示例：
 ```yaml
@@ -130,13 +131,14 @@ strategies:
 - `sim`：`initial_capital` / `max_leverage` / `fee_rate` / `slippage`
 - `risk`：`max_position_notional` / `max_position_pct_equity` / `mmr_tiers`
 - `strategy`：`trend_strength_min` / `atr_stop_mult` / `cooldown_after_stop` / `rsi_*`
+- `indicators`：指标窗口（rsi/ema_fast/ema_slow/macd/atr/ema_trend）
+- `kline_cache`：每个策略所需的 warmup/buffer 条数
 
-> 兼容说明：全局 `sim/risk/strategy` 仍可作为默认兜底；若策略文件提供同名参数，则以策略文件为准。
+> 兼容说明：默认值按策略文件为准；未提供的字段使用运行时内置默认（不再依赖全局）。
 
 ### warmup 与缓存
-- `kline_cache.max_bars_15m / max_bars_1h`：环形缓冲上限
-- `kline_cache.warmup_extra_bars`：额外缓冲
-- `kline_cache.warmup_buffer_mult`：最小 bars 的倍数（默认 3x）
+- 每个策略的 `kline_cache` 会单独声明，Runtime 会聚合取最大需求来订阅/缓存。
+- 字段：`max_bars_15m / max_bars_1h`（缓冲上限）、`warmup_extra_bars`、`warmup_buffer_mult`（默认 3x）
 
 ### 告警
 - `alerts.enabled`：总开关

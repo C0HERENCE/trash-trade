@@ -24,3 +24,26 @@ strategy:
   rsi_short_upper: 55
   rsi_short_lower: 20
   rsi_slope_required: false
+
+indicators:
+  rsi:
+    length: 14
+  ema_fast:
+    length: 5
+  ema_slow:
+    length: 20
+  ema_trend:
+    fast: 20
+    slow: 60
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  atr:
+    length: 14
+
+kline_cache:
+  max_bars_15m: 2000
+  max_bars_1h: 2000
+  warmup_extra_bars: 200
+  warmup_buffer_mult: 3.0

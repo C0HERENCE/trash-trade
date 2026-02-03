@@ -88,6 +88,22 @@ class RuntimeEngine:
         return dst
 
     def _build_strategy_profile(self, entry) -> Dict[str, Any]:
+        # Default per-strategy knobs (no longer taken from global settings)
+        default_indicators = {
+            "rsi": {"length": 14},
+            "ema_fast": {"length": 12},
+            "ema_slow": {"length": 26},
+            "macd": {"fast": 12, "slow": 26, "signal": 9},
+            "atr": {"length": 14},
+            "ema_trend": {"fast": 20, "slow": 60},
+        }
+        default_kcache = {
+            "max_bars_15m": 2000,
+            "max_bars_1h": 2000,
+            "warmup_buffer_mult": 3.0,
+            "warmup_extra_bars": 200,
+        }
+
         profile: Dict[str, Any] = {
             "sim": {
                 "initial_capital": self._settings.sim.initial_capital,
@@ -101,15 +117,17 @@ class RuntimeEngine:
                 "mmr_tiers": self._settings.risk.mmr_tiers,
             },
             "strategy": {
-                "trend_strength_min": self._settings.strategy.trend_strength_min,
-                "atr_stop_mult": self._settings.strategy.atr_stop_mult,
-                "cooldown_after_stop": self._settings.strategy.cooldown_after_stop,
-                "rsi_long_lower": self._settings.strategy.rsi_long_lower,
-                "rsi_long_upper": self._settings.strategy.rsi_long_upper,
-                "rsi_short_upper": self._settings.strategy.rsi_short_upper,
-                "rsi_short_lower": self._settings.strategy.rsi_short_lower,
-                "rsi_slope_required": self._settings.strategy.rsi_slope_required,
+                "trend_strength_min": 0.003,
+                "atr_stop_mult": 1.5,
+                "cooldown_after_stop": 4,
+                "rsi_long_lower": 50.0,
+                "rsi_long_upper": 60.0,
+                "rsi_short_upper": 50.0,
+                "rsi_short_lower": 40.0,
+                "rsi_slope_required": True,
             },
+            "indicators": default_indicators,
+            "kline_cache": default_kcache,
         }
 
         if entry.config_path:
@@ -159,10 +177,8 @@ class RuntimeEngine:
         await self._load_account_state()
         await self._load_open_positions()
 
-        bars_15m, bars_1h = self._compute_warmup_bars()
-        maxlen_15m = max(self._settings.kline_cache.max_bars_15m, bars_15m)
-        maxlen_1h = max(self._settings.kline_cache.max_bars_1h, bars_1h)
-        self._buffers = KlineBufferManager({"15m": maxlen_15m, "1h": maxlen_1h})
+        warmup_bars, buffer_sizes = self._compute_warmup_bars()
+        self._buffers = KlineBufferManager(buffer_sizes)
 
         async with BinanceRestClient(self._settings.binance.rest_base) as rest:
             await warmup_all(
@@ -171,7 +187,7 @@ class RuntimeEngine:
                 self._buffers,
                 self._settings.binance.symbol,
                 self._settings.binance.intervals,
-                {"15m": bars_15m, "1h": bars_1h},
+                warmup_bars,
             )
 
         self._indicators = IndicatorEngine(self._buffers)
@@ -282,25 +298,58 @@ class RuntimeEngine:
                 }
             )
 
-    def _compute_warmup_bars(self) -> tuple[int, int]:
-        # Defaults for strategy indicators
-        min_15m = compute_min_bars(
-            ema_fast=20,
-            ema_slow=60,
-            rsi=14,
-            macd_fast=12,
-            macd_slow=26,
-            macd_signal=9,
-            atr=14,
-        )
-        min_1h = max(60, 14 + 1)
-        bars_15m = compute_warmup_bars(
-            min_15m, self._settings.kline_cache.warmup_buffer_mult, self._settings.kline_cache.warmup_extra_bars
-        )
-        bars_1h = compute_warmup_bars(
-            min_1h, self._settings.kline_cache.warmup_buffer_mult, self._settings.kline_cache.warmup_extra_bars
-        )
-        return bars_15m, bars_1h
+    def _compute_warmup_bars(self) -> tuple[Dict[str, int], Dict[str, int]]:
+        """
+        Aggregate all strategies' indicator需求，得到:
+          - warmup_bars: 每个 interval 需要的最少历史条数（用于 REST warmup）
+          - buffer_sizes: 环形缓存需要的 maxlen（至少覆盖 warmup）
+        """
+        intervals = ["15m", "1h"]
+        warmup: Dict[str, int] = {i: 0 for i in intervals}
+        maxlen: Dict[str, int] = {i: 0 for i in intervals}
+
+        for sid, profile in self._profiles.items():
+            ind = profile.get("indicators", {})
+            kc = profile.get("kline_cache", {})
+
+            ema_fast = ind.get("ema_fast", {}).get("length", 12)
+            ema_slow = ind.get("ema_slow", {}).get("length", 26)
+            macd_cfg = ind.get("macd", {})
+            macd_fast = macd_cfg.get("fast", ema_fast)
+            macd_slow = macd_cfg.get("slow", ema_slow)
+            macd_signal = macd_cfg.get("signal", 9)
+            atr_len = ind.get("atr", {}).get("length", 14)
+            rsi_len = ind.get("rsi", {}).get("length", 14)
+            trend_fast = ind.get("ema_trend", {}).get("fast", 20)
+            trend_slow = ind.get("ema_trend", {}).get("slow", 60)
+
+            min_15m = compute_min_bars(
+                ema_fast=ema_fast,
+                ema_slow=ema_slow,
+                rsi=rsi_len,
+                macd_fast=macd_fast,
+                macd_slow=macd_slow,
+                macd_signal=macd_signal,
+                atr=atr_len,
+            )
+            min_1h = max(trend_slow, trend_fast, rsi_len + 1)
+
+            buf_mult = kc.get("warmup_buffer_mult", 3.0)
+            extra = kc.get("warmup_extra_bars", 200)
+            bars_15m = compute_warmup_bars(min_15m, buf_mult, extra)
+            bars_1h = compute_warmup_bars(min_1h, buf_mult, extra)
+
+            warmup["15m"] = max(warmup["15m"], bars_15m)
+            warmup["1h"] = max(warmup["1h"], bars_1h)
+            maxlen["15m"] = max(maxlen["15m"], kc.get("max_bars_15m", bars_15m))
+            maxlen["1h"] = max(maxlen["1h"], kc.get("max_bars_1h", bars_1h))
+
+        # 保底避免 0
+        for k in warmup:
+            warmup[k] = max(warmup[k], 500 if k == "15m" else 200)
+            maxlen[k] = max(maxlen[k], warmup[k])
+
+        return warmup, maxlen
 
     async def _load_account_state(self) -> None:
         # per-strategy latest equity snapshot
