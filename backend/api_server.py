@@ -539,19 +539,10 @@ async def get_indicator_history(
         res_map = snap_map.get(sid)
         if res_map is None:
             continue
-        ema_fast_res = res_map.get("ema_fast")
-        ema_slow_res = res_map.get("ema_slow")
-        rsi_res = res_map.get("rsi")
-        macd_res = res_map.get("macd_hist")
-        series.append(
-            {
-                "time": int(r["open_time"]) // 1000,
-                "ema20": ema_fast_res.value if ema_fast_res else None,
-                "ema60": ema_slow_res.value if ema_slow_res else None,
-                "rsi14": rsi_res.value if rsi_res else None,
-                "macd_hist": macd_res.value if macd_res else None,
-            }
-        )
+        item = {"time": int(r["open_time"]) // 1000}
+        for name, res in res_map.items():
+            item[name] = res.value
+        series.append(item)
     # indicator hints for frontend rendering (purely derived from specs, no hardcoded names)
     price_overlays = [
         s for s in specs if getattr(s, "interval", None) == "15m" and s.__class__.__name__ == "EmaSpec"
