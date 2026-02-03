@@ -90,6 +90,16 @@ class IStrategy(Protocol):
 
     id: str
 
+    def describe_conditions(
+        self,
+        ctx: StrategyContext,
+        ind_1h_ready: bool,
+        has_position: bool,
+        cooldown_bars: int,
+    ) -> dict:
+        """Return {"long":[...], "short":[...]} checklist for UI/stream."""
+        ...
+
     def on_bar_close(self, ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
         ...
 

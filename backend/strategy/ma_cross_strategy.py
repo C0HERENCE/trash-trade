@@ -28,6 +28,28 @@ class MaCrossStrategy(IStrategy):
 
     id: str = "ma_cross"
 
+    def describe_conditions(self, ctx: StrategyContext, ind_1h_ready: bool, has_position: bool, cooldown_bars: int) -> dict:
+        def item(label, ok, value=None, target=None, info=None):
+            return {"label": label, "ok": ok, "value": value, "target": target, "info": info}
+
+        if not ind_1h_ready:
+            return {"long": [item("1h指标未就绪", False)], "short": [item("1h指标未就绪", False)]}
+        if has_position:
+            return {"long": [item("已有持仓", False)], "short": [item("已有持仓", False)]}
+        if cooldown_bars > 0:
+            label = f"冷却中({cooldown_bars})"
+            return {"long": [item(label, False)], "short": [item(label, False)]}
+
+        cond_long = []
+        cond_short = []
+        cond_long.append(item("15m EMA 多头", ctx.ind_15m.ema20 > ctx.ind_15m.ema60, info=f"ema20:{ctx.ind_15m.ema20:.2f}, ema60:{ctx.ind_15m.ema60:.2f}"))
+        cond_short.append(item("15m EMA 空头", ctx.ind_15m.ema20 < ctx.ind_15m.ema60, info=f"ema20:{ctx.ind_15m.ema20:.2f}, ema60:{ctx.ind_15m.ema60:.2f}"))
+        cond_long.append(item("1h RSI 多头", ctx.ind_1h.rsi14 > 50, value=ctx.ind_1h.rsi14, target=">50"))
+        cond_short.append(item("1h RSI 空头", ctx.ind_1h.rsi14 < 50, value=ctx.ind_1h.rsi14, target="<50"))
+        cond_long.append(item("ATR 止损可用", ctx.atr14 is not None, value=ctx.atr14))
+        cond_short.append(item("ATR 止损可用", ctx.atr14 is not None, value=ctx.atr14))
+        return {"long": cond_long, "short": cond_short}
+
     def on_state_restore(self, ctx: StrategyContext) -> None:
         return
 
@@ -76,4 +98,3 @@ class MaCrossStrategy(IStrategy):
     def on_tick(self, ctx: StrategyContext, price: float) -> ExitAction | None:
         # This strategy only exits on bar close trend flip; real-time exits reuse shared stop/tp logic handled elsewhere
         return None
-
