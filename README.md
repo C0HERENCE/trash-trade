@@ -13,7 +13,8 @@ trash-trade/
   backend/
     api_server.py          # FastAPI REST + WebSocket 状态推送
     main.py                # 运行入口（启动主循环 + API）
-    runtime.py             # 主循环编排（warmup/WS/指标/多策略广播/撮合/状态）
+    runtime.py             # 主循环编排（多策略调度/撮合/状态，行情与指标委派给 MarketStateManager）
+    marketdata/state.py    # MarketStateManager：K线缓冲、指标计算、warmup聚合、条件/k线/指标推送
     strategy/
       interfaces.py        # IStrategy 接口与上下文模型
       test_strategy.py     # 默认测试策略（test）
@@ -137,7 +138,7 @@ strategies:
 > 兼容说明：默认值按策略文件为准；未提供的字段使用运行时内置默认（不再依赖全局）。
 
 ### warmup 与缓存
-- 每个策略的 `kline_cache` 会单独声明，Runtime 会聚合取最大需求来订阅/缓存。
+- 每个策略的 `kline_cache` 独立声明，MarketStateManager 聚合取最大需求来订阅/缓存。
 - 字段：`max_bars_15m / max_bars_1h`（缓冲上限）、`warmup_extra_bars`、`warmup_buffer_mult`（默认 3x）
 
 ### 告警
