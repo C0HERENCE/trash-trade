@@ -215,7 +215,7 @@ watch(() => props.position, () => {
 
 <template>
   <div class="card">
-    <h2>15m K 线 + EMA</h2>
+    <h2>15m K 线 + {{ overlaySeries.map(s => s.name).join(' / ') || '指标' }}</h2>
     <div ref="chartContainer" id="chart" style="height: clamp(220px, 30vh, 420px); width: 100%;"></div>
   </div>
 </template>

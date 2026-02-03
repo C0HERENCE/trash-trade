@@ -131,7 +131,7 @@ watch(() => props.indicators, (i) => {
 
 <template>
   <div class="card">
-    <h2>MACD 柱 + RSI</h2>
+    <h2>副图：{{ subSeries.map(s => s.name).join(' / ') || '指标' }}</h2>
     <div ref="chartContainer" id="subchart" style="height: clamp(140px, 22vh, 220px); width: 100%;"></div>
   </div>
 </template>
