@@ -201,7 +201,16 @@ class RuntimeEngine:
         self._state_mgr.indicators = IndicatorEngine(self._indicator_requirements)
 
         # Prime indicators and last-condition snapshot from history
-        await self._prime_indicators_from_history()
+        init_state = await self._state_mgr.prime_from_history(self._strategies, self._stream_store)
+        # Sync transitional state (will be moved fully into manager in later steps)
+        self._ind_1h_map = init_state.get("ind_1h_map", {})
+        self._last_rsi_15m = init_state.get("last_rsi_15m", {})
+        self._prev_macd_hist_15m = init_state.get("prev_macd_hist_15m", {})
+        self._prev2_macd_hist_15m = init_state.get("prev2_macd_hist_15m", {})
+        self._prev_ema20_15m = init_state.get("prev_ema20_15m", {})
+        self._prev_ema60_15m = init_state.get("prev_ema60_15m", {})
+        self._last_ema20_15m = init_state.get("last_ema20_15m", {})
+        self._last_ema60_15m = init_state.get("last_ema60_15m", {})
 
         reconnect = WsReconnectPolicy(
             max_retries=self._settings.binance.ws_reconnect.max_retries,

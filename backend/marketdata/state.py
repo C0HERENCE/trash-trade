@@ -27,6 +27,14 @@ class MarketStateManager:
         self.buffers: Optional[KlineBufferManager] = None
         self.indicators: Optional[IndicatorEngine] = None
         self.indicator_requirements: Dict[str, Dict[str, Dict]] = {}
+        self.last_rsi_15m: Dict[str, Optional[float]] = {}
+        self.prev_macd_hist_15m: Dict[str, Optional[float]] = {}
+        self.prev2_macd_hist_15m: Dict[str, Optional[float]] = {}
+        self.prev_ema20_15m: Dict[str, Optional[float]] = {}
+        self.prev_ema60_15m: Dict[str, Optional[float]] = {}
+        self.last_ema20_15m: Dict[str, Optional[float]] = {}
+        self.last_ema60_15m: Dict[str, Optional[float]] = {}
+        self.ind_1h_map: Dict[str, Any] = {}
 
     # ---- warmup aggregation ----
     def compute_warmup(
@@ -100,9 +108,102 @@ class MarketStateManager:
         return warmup, maxlen
 
     # ---- to be implemented in later steps ----
-    async def prime_from_history(self) -> None:
-        """使用已有 K 线数据预热指标与状态。"""
-        raise NotImplementedError
+    async def prime_from_history(self, strategies: Dict[str, IStrategy], stream_store) -> Dict[str, Any]:
+        """
+        使用已有 K 线（buffers 已填充）预热指标与 per-strategy 状态。
+        返回用于 runtime 兼容的初始状态字典。
+        """
+        if self.indicators is None or self.buffers is None:
+            return {}
+
+        # 1h
+        bars_1h = self.buffers.buffer("1h").to_list()
+        if bars_1h:
+            for bar in bars_1h:
+                snaps = self.indicators.update_on_close("1h", bar)
+                for sid, snap in snaps.items():
+                    if snap.ema_fast is None or snap.ema_slow is None or snap.rsi is None:
+                        continue
+                    self.ind_1h_map[sid] = {
+                        "ema20": snap.ema_fast,
+                        "ema60": snap.ema_slow,
+                        "rsi14": snap.rsi,
+                        "close": bar.close,
+                    }
+
+        # 15m
+        bars_15m = self.buffers.buffer("15m").to_list()
+        last_bar_15m = None
+        last_snap_15m = None
+        if bars_15m:
+            for bar in bars_15m:
+                last_bar_15m = bar
+                snaps = self.indicators.update_on_close("15m", bar)
+                for sid, snap in snaps.items():
+                    if snap.ema_fast is None or snap.ema_slow is None:
+                        continue
+                    self.prev_ema20_15m[sid] = self.last_ema20_15m.get(sid)
+                    self.prev_ema60_15m[sid] = self.last_ema60_15m.get(sid)
+                    self.last_ema20_15m[sid] = snap.ema_fast
+                    self.last_ema60_15m[sid] = snap.ema_slow
+                    last_snap_15m = snap
+                    if self.last_rsi_15m.get(sid) is None:
+                        self.last_rsi_15m[sid] = snap.rsi
+                        self.prev_macd_hist_15m[sid] = snap.macd_hist
+                        self.prev2_macd_hist_15m[sid] = snap.macd_hist
+                    else:
+                        self.prev2_macd_hist_15m[sid] = self.prev_macd_hist_15m.get(sid)
+                        self.prev_macd_hist_15m[sid] = snap.macd_hist
+                        self.last_rsi_15m[sid] = snap.rsi
+
+        # 推送初始快照
+        if stream_store is not None:
+            if last_bar_15m is not None:
+                await stream_store.update_snapshot(
+                    kline_15m={
+                        "t": last_bar_15m.open_time,
+                        "T": last_bar_15m.close_time,
+                        "o": last_bar_15m.open,
+                        "h": last_bar_15m.high,
+                        "l": last_bar_15m.low,
+                        "c": last_bar_15m.close,
+                        "v": last_bar_15m.volume,
+                        "x": last_bar_15m.is_closed,
+                    }
+                )
+            if last_snap_15m is not None:
+                await stream_store.update_snapshot(
+                    indicators_15m={
+                        "ema20": last_snap_15m.ema_fast,
+                        "ema60": last_snap_15m.ema_slow,
+                        "rsi14": last_snap_15m.rsi,
+                        "macd_hist": last_snap_15m.macd_hist,
+                        "atr14": last_snap_15m.atr,
+                    }
+                )
+            first = next(iter(self.ind_1h_map.values()), None)
+            if first:
+                await stream_store.update_snapshot(
+                    indicators_1h={
+                        "ema20": first["ema20"],
+                        "ema60": first["ema60"],
+                        "rsi14": first["rsi14"],
+                        "close": first["close"],
+                    }
+                )
+
+        return {
+            "last_bar_15m": last_bar_15m,
+            "last_snap_15m": last_snap_15m,
+            "ind_1h_map": self.ind_1h_map,
+            "last_rsi_15m": self.last_rsi_15m,
+            "prev_macd_hist_15m": self.prev_macd_hist_15m,
+            "prev2_macd_hist_15m": self.prev2_macd_hist_15m,
+            "prev_ema20_15m": self.prev_ema20_15m,
+            "prev_ema60_15m": self.prev_ema60_15m,
+            "last_ema20_15m": self.last_ema20_15m,
+            "last_ema60_15m": self.last_ema60_15m,
+        }
 
     async def on_kline_update(self, interval: str, bar: KlineBar) -> Dict[str, Any]:
         """处理 x=false 实时更新，返回可推送给前端的 payload。"""
@@ -114,4 +215,3 @@ class MarketStateManager:
         {sid: {"ctx": StrategyContext, "conditions": {...}, "indicators": {...}}}
         """
         raise NotImplementedError
-
