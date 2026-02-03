@@ -194,6 +194,7 @@ watch(() => props.indicators, (i) => {
       name,
       series: chart?.addLineSeries({ color: idx === 0 ? '#5cc8ff' : '#ffb86c', lineWidth: 1 })
     }))
+    console.debug('[chart] created overlay series from live keys:', keys)
   }
   const t = Math.floor(props.kline.t / 1000)
   overlaySeries.forEach(({ name, series }) => {

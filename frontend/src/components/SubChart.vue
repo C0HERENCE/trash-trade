@@ -107,6 +107,7 @@ watch(() => props.indicators, (i) => {
       name,
       series: chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 })
     }))
+    console.debug('[subchart] created sub series from live keys:', keys)
   }
   const t = Math.floor(props.kline.t / 1000)
   subSeries.forEach(({ name, series }) => {
