@@ -80,6 +80,7 @@ const loadIndicatorHistory = async () => {
     const data = await res.json()
     const items = data.items || []
     const overlays = (data.hints && data.hints.price_overlays) || []
+    console.debug('[chart] history hints overlays:', overlays)
 
     // create series for each overlay field
     overlaySeries = overlays.map((name, idx) => ({
@@ -197,7 +198,11 @@ watch(() => props.indicators, (i) => {
   const t = Math.floor(props.kline.t / 1000)
   overlaySeries.forEach(({ name, series }) => {
     const v = i[name]
-    if (v !== undefined && v !== null) series?.update({ time: t, value: v })
+    if (v !== undefined && v !== null) {
+      series?.update({ time: t, value: v })
+    } else {
+      console.debug('[chart] missing value for overlay', name, 'payload keys', Object.keys(i || {}))
+    }
   })
 })
 

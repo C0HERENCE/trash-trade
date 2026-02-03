@@ -31,6 +31,7 @@ const loadIndicatorHistory = async () => {
     const data = await res.json()
     const hints = data.hints || {}
     const subs = hints.subchart || []
+    console.debug('[subchart] history hints subchart:', subs)
     subSeries = subs.map((name, idx) => ({
       name,
       series: chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 }),
@@ -110,7 +111,11 @@ watch(() => props.indicators, (i) => {
   const t = Math.floor(props.kline.t / 1000)
   subSeries.forEach(({ name, series }) => {
     const v = i[name]
-    if (v !== undefined && v !== null) series?.update({ time: t, value: v })
+    if (v !== undefined && v !== null) {
+      series?.update({ time: t, value: v })
+    } else {
+      console.debug('[subchart] missing value for', name, 'payload keys', Object.keys(i || {}))
+    }
   })
 })
 </script>
