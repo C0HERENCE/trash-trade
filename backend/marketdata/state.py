@@ -283,7 +283,27 @@ class MarketStateManager:
             prev_macd = self.prev_macd_hist_15m.get(sid, snap.macd_hist or 0.0)
             prev2_macd = self.prev2_macd_hist_15m.get(sid, snap.macd_hist or 0.0)
 
+            indicators_map = {
+                "ema20_15m": snap.ema_fast,
+                "ema60_15m": snap.ema_slow,
+                "rsi14_15m": snap.rsi,
+                "macd_hist_15m": snap.macd_hist,
+                "atr14_15m": snap.atr,
+                "ema20_1h": ind1.ema20,
+                "ema60_1h": ind1.ema60,
+                "rsi14_1h": ind1.rsi14,
+                "close_1h": ind1.close,
+            }
+            history_map = {
+                "rsi14_15m": [prev_rsi, snap.rsi],
+                "macd_hist_15m": [prev2_macd, prev_macd, snap.macd_hist],
+                "ema20_15m": [self.prev_ema20_15m.get(sid), snap.ema_fast],
+                "ema60_15m": [self.prev_ema60_15m.get(sid), snap.ema_slow],
+            }
+
             ctx = StrategyContext(
+                timestamp=bar.close_time,
+                interval=interval,
                 price=bar.close,
                 close_15m=bar.close,
                 low_15m=bar.low,
@@ -304,6 +324,8 @@ class MarketStateManager:
                 structure_stop=None,
                 position=None,  # runtime 填充
                 cooldown_bars_remaining=0,  # runtime 填充
+                indicators=indicators_map,
+                history=history_map,
             )
             result[sid] = {"ctx": ctx, "indicators": stream_updates["indicators_15m"]}
 
