@@ -103,6 +103,8 @@ class MaCrossStrategy(IStrategy):
         ema60 = ctx.ind("ema60_15m")
         rsi1h = ctx.ind("rsi14_1h")
         atr15 = ctx.ind("atr14_15m")
+        params = ctx.meta.get("params", {})
+        atr_mult = params.get("atr_stop_mult", 1.2)
 
         # exit on trend flip
         if ctx.position is not None:
@@ -120,29 +122,29 @@ class MaCrossStrategy(IStrategy):
         if ema20 is not None and ema60 is not None and rsi1h is not None:
             if ema20 > ema60 and rsi1h > 50:
                 entry = ctx.close_15m
-                stop = _choose_stop(entry, atr15, ctx.structure_stop, ctx.atr_stop_mult, "LONG")
+                stop = _choose_stop(entry, atr15, ctx.structure_stop, atr_mult, "LONG")
                 tp1, tp2 = _calc_targets(entry, stop)
                 return EntrySignal(
                     side="LONG",
                     entry_price=entry,
                     stop_price=stop,
-                tp1_price=tp1,
-                tp2_price=tp2,
-                reason="ma_long",
-            )
+                    tp1_price=tp1,
+                    tp2_price=tp2,
+                    reason="ma_long",
+                )
 
             if ema20 < ema60 and rsi1h < 50:
                 entry = ctx.close_15m
-                stop = _choose_stop(entry, atr15, ctx.structure_stop, ctx.atr_stop_mult, "SHORT")
+                stop = _choose_stop(entry, atr15, ctx.structure_stop, atr_mult, "SHORT")
                 tp1, tp2 = _calc_targets(entry, stop)
                 return EntrySignal(
                     side="SHORT",
                     entry_price=entry,
                     stop_price=stop,
-                tp1_price=tp1,
-                tp2_price=tp2,
-                reason="ma_short",
-            )
+                    tp1_price=tp1,
+                    tp2_price=tp2,
+                    reason="ma_short",
+                )
 
         return None
 

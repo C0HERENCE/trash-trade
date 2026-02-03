@@ -49,16 +49,6 @@ class StrategyContext:
     position: Optional[PositionState] = None
     cooldown_bars_remaining: int = 0
 
-    # params
-    trend_strength_min: float = 0.0
-    atr_stop_mult: float = 0.0
-    cooldown_after_stop: int = 0
-    rsi_long_lower: float = 0.0
-    rsi_long_upper: float = 0.0
-    rsi_short_upper: float = 0.0
-    rsi_short_lower: float = 0.0
-    rsi_slope_required: bool = False
-
     # generic containers for extensibility
     indicators: Dict[str, Any] = field(default_factory=dict)
     features: Dict[str, Any] = field(default_factory=dict)
@@ -80,6 +70,9 @@ class StrategyContext:
             return seq[-k]
         except Exception:
             return default
+
+    def param(self, name: str, default=None):
+        return (self.meta.get("params") or {}).get(name, default)
 
 
 @dataclass(slots=True)

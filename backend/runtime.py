@@ -302,14 +302,7 @@ class RuntimeEngine:
             ctx.position = self._positions.get(sid)
             ctx.cooldown_bars_remaining = self._cooldowns.get(sid, 0)
             strategy_cfg = self._profiles[sid].get("strategy", {})
-            ctx.trend_strength_min = float(strategy_cfg.get("trend_strength_min", 0.0))
-            ctx.atr_stop_mult = float(strategy_cfg.get("atr_stop_mult", 1.0))
-            ctx.cooldown_after_stop = int(strategy_cfg.get("cooldown_after_stop", 0))
-            ctx.rsi_long_lower = float(strategy_cfg.get("rsi_long_lower", 50.0))
-            ctx.rsi_long_upper = float(strategy_cfg.get("rsi_long_upper", 60.0))
-            ctx.rsi_short_upper = float(strategy_cfg.get("rsi_short_upper", 50.0))
-            ctx.rsi_short_lower = float(strategy_cfg.get("rsi_short_lower", 40.0))
-            ctx.rsi_slope_required = bool(strategy_cfg.get("rsi_slope_required", False))
+            ctx.meta["params"] = strategy_cfg
 
             conditions = strat.describe_conditions(
                 ctx=ctx,
