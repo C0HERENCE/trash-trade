@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import load_settings
 from .db import Database
 from .indicators.engine import IndicatorEngine
+from .indicators.legacy_adapter import build_specs_from_legacy
 from .marketdata.buffer import KlineBar
 import msgpack
 
