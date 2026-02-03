@@ -9,5 +9,18 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false
   },
-  base: './'
+  base: './',
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+        ws: true,
+      },
+    },
+  },
 })
