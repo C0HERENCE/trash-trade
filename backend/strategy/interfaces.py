@@ -34,14 +34,14 @@ class PositionState:
 @dataclass(slots=True)
 class StrategyContext:
     # latest prices
-    price: float
-    close_15m: float
-    low_15m: float
-    high_15m: float
+    price: float = 0.0
+    close_15m: float = 0.0
+    low_15m: float = 0.0
+    high_15m: float = 0.0
 
     # indicators
-    ind_15m: Indicators15m
-    ind_1h: Indicators1h
+    ind_15m: Optional[Indicators15m] = None
+    ind_1h: Optional[Indicators1h] = None
 
     # history for cross/sequence checks
     prev_rsi_15m: Optional[float] = None
@@ -59,14 +59,14 @@ class StrategyContext:
     cooldown_bars_remaining: int = 0
 
     # params
-    trend_strength_min: float
-    atr_stop_mult: float
-    cooldown_after_stop: int
-    rsi_long_lower: float
-    rsi_long_upper: float
-    rsi_short_upper: float
-    rsi_short_lower: float
-    rsi_slope_required: bool
+    trend_strength_min: float = 0.0
+    atr_stop_mult: float = 0.0
+    cooldown_after_stop: int = 0
+    rsi_long_lower: float = 0.0
+    rsi_long_upper: float = 0.0
+    rsi_short_upper: float = 0.0
+    rsi_short_lower: float = 0.0
+    rsi_slope_required: bool = False
 
 
 @dataclass(slots=True)
