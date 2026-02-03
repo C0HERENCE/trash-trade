@@ -17,9 +17,8 @@ from .indicators import IndicatorEngine
 from .marketdata.buffer import (
     KlineBar,
     KlineBufferManager,
-    compute_min_bars,
-    compute_warmup_bars,
 )
+from .marketdata.state import MarketStateManager
 from .marketdata.rest import BinanceRestClient, warmup_all
 from .marketdata.ws import BinanceWsClient, WsReconnectPolicy
 from .models import EquitySnapshot, PositionClose, PositionOpen, Trade, LedgerEntry
@@ -59,6 +58,7 @@ class RuntimeEngine:
         self._buffers: Optional[KlineBufferManager] = None
         self._indicators: Optional[IndicatorEngine] = None
         self._ws: Optional[BinanceWsClient] = None
+        self._state_mgr = MarketStateManager()
 
         # multi-strategy containers
         self._strategies: dict[str, IStrategy] = {}
@@ -183,7 +183,8 @@ class RuntimeEngine:
         await self._load_account_state()
         await self._load_open_positions()
 
-        warmup_bars, buffer_sizes = self._compute_warmup_bars()
+        warmup_bars, buffer_sizes = self._state_mgr.compute_warmup(self._strategies, self._profiles)
+        self._indicator_requirements = self._state_mgr.indicator_requirements
         self._buffers = KlineBufferManager(buffer_sizes)
 
         async with BinanceRestClient(self._settings.binance.rest_base) as rest:
@@ -196,7 +197,8 @@ class RuntimeEngine:
                 warmup_bars,
             )
 
-        self._indicators = IndicatorEngine(self._indicator_requirements)
+        self._state_mgr.buffers = self._buffers
+        self._state_mgr.indicators = IndicatorEngine(self._indicator_requirements)
 
         # Prime indicators and last-condition snapshot from history
         await self._prime_indicators_from_history()

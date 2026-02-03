@@ -7,13 +7,18 @@ MarketStateManager
 - warmup / buffer 需求
 - 指标引擎实例
 - per-strategy 最新指标 / 条件 / K 线快照
-当前为框架占位，后续步骤逐步填充实现。
+当前已实现 warmup 聚合，其余接口稍后步骤补充。
 """
 
 from typing import Dict, Any, Optional, Tuple
 
 from ..indicators import IndicatorEngine
-from ..marketdata.buffer import KlineBufferManager, KlineBar
+from ..marketdata.buffer import (
+    KlineBufferManager,
+    KlineBar,
+    compute_min_bars,
+    compute_warmup_bars,
+)
 from ..strategy import IStrategy
 
 
@@ -23,15 +28,78 @@ class MarketStateManager:
         self.indicators: Optional[IndicatorEngine] = None
         self.indicator_requirements: Dict[str, Dict[str, Dict]] = {}
 
-    # ---- to be implemented in later steps ----
-    def compute_warmup(self, strategies: Dict[str, IStrategy], profiles: Dict[str, Dict[str, Any]]) -> Tuple[Dict[str, int], Dict[str, int]]:
+    # ---- warmup aggregation ----
+    def compute_warmup(
+        self, strategies: Dict[str, IStrategy], profiles: Dict[str, Dict[str, Any]]
+    ) -> Tuple[Dict[str, int], Dict[str, int]]:
         """
         聚合策略需求，返回 (warmup_bars, buffer_sizes)
-        warmup_bars: {interval: bars}
-        buffer_sizes: {interval: maxlen}
+        warmup_bars: {interval: bars}  # REST 拉取条数
+        buffer_sizes: {interval: maxlen}  # 环形缓冲长度
         """
-        raise NotImplementedError
+        intervals = ["15m", "1h"]
+        warmup: Dict[str, int] = {i: 0 for i in intervals}
+        maxlen: Dict[str, int] = {i: 0 for i in intervals}
+        self.indicator_requirements = {}
 
+        for sid, strat in strategies.items():
+            req = strat.indicator_requirements() or {}
+            self.indicator_requirements[sid] = req
+            kc = profiles[sid].get("kline_cache", {}) if sid in profiles else {}
+            wp = strat.warmup_policy() or {}
+
+            # 15m需求
+            req_15 = req.get("15m", {})
+            ema_vals = req_15.get("ema", [20, 60])
+            ema_fast = ema_vals[0] if len(ema_vals) > 0 else 20
+            ema_slow = ema_vals[1] if len(ema_vals) > 1 else 60
+            rsi_len = req_15.get("rsi", 14)
+            macd_cfg = req_15.get("macd", {"fast": 12, "slow": 26, "signal": 9})
+            macd_fast = macd_cfg.get("fast", 12)
+            macd_slow = macd_cfg.get("slow", 26)
+            macd_signal = macd_cfg.get("signal", 9)
+            atr_len = req_15.get("atr", 14)
+
+            # 1h需求
+            req_1h = req.get("1h", {})
+            trend_ema = req_1h.get("ema", [20, 60])
+            trend_fast = trend_ema[0] if len(trend_ema) > 0 else 20
+            trend_slow = trend_ema[1] if len(trend_ema) > 1 else 60
+            rsi_len_1h = req_1h.get("rsi", 14)
+
+            min_15m = compute_min_bars(
+                ema_fast=ema_fast,
+                ema_slow=ema_slow,
+                rsi=rsi_len,
+                macd_fast=macd_fast,
+                macd_slow=macd_slow,
+                macd_signal=macd_signal,
+                atr=atr_len,
+            )
+            min_1h = max(trend_slow, trend_fast, rsi_len_1h + 1)
+
+            wp15 = wp.get("15m", {})
+            wp1 = wp.get("1h", {})
+            buf_mult_15 = wp15.get("buffer_mult", kc.get("warmup_buffer_mult", 3.0))
+            extra_15 = wp15.get("extra", kc.get("warmup_extra_bars", 200))
+            buf_mult_1h = wp1.get("buffer_mult", kc.get("warmup_buffer_mult", 3.0))
+            extra_1h = wp1.get("extra", kc.get("warmup_extra_bars", 200))
+
+            bars_15m = compute_warmup_bars(min_15m, buf_mult_15, extra_15)
+            bars_1h = compute_warmup_bars(min_1h, buf_mult_1h, extra_1h)
+
+            warmup["15m"] = max(warmup["15m"], bars_15m)
+            warmup["1h"] = max(warmup["1h"], bars_1h)
+            maxlen["15m"] = max(maxlen["15m"], kc.get("max_bars_15m", bars_15m))
+            maxlen["1h"] = max(maxlen["1h"], kc.get("max_bars_1h", bars_1h))
+
+        for k in warmup:
+            warmup[k] = max(warmup[k], 500 if k == "15m" else 200)
+            maxlen[k] = max(maxlen[k], warmup[k])
+
+        return warmup, maxlen
+
+    # ---- to be implemented in later steps ----
     async def prime_from_history(self) -> None:
         """使用已有 K 线数据预热指标与状态。"""
         raise NotImplementedError
@@ -46,3 +114,4 @@ class MarketStateManager:
         {sid: {"ctx": StrategyContext, "conditions": {...}, "indicators": {...}}}
         """
         raise NotImplementedError
+
