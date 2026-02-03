@@ -31,9 +31,13 @@ const loadIndicatorHistory = async () => {
     const data = await res.json()
     const hints = data.hints || {}
     const subs = hints.subchart || []
+    const types = hints.types || {}
     subSeries = subs.map((name, idx) => ({
       name,
-      series: chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 }),
+      series:
+        types[name] === 'histogram'
+          ? chart?.addHistogramSeries({ color: '#7ee787' })
+          : chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 }),
       data: [],
     }))
 

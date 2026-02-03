@@ -549,9 +549,23 @@ async def get_indicator_history(
     ]
     # sort EMA overlays by length if available, shortest first (fast then slow)
     price_overlays.sort(key=lambda s: getattr(s, "length", 10**9))
+    types = {}
+    # Provide type hints: MACD histogram -> histogram, RSI -> line, EMA -> line
+    for spec in specs:
+        name = spec.name
+        cls = spec.__class__.__name__
+        if "macd" in name.lower():
+            types[name] = "histogram"
+        elif "rsi" in name.lower():
+            types[name] = "line"
+        elif "ema" in name.lower():
+            types[name] = "line"
+        elif "atr" in name.lower():
+            types[name] = "line"
     hints = {
         "price_overlays": [s.name for s in price_overlays],
         "subchart": [s.name for s in specs if getattr(s, "interval", None) == "15m" and s.__class__.__name__ != "EmaSpec"],
+        "types": types,
     }
     return {"items": series, "hints": hints}
 
