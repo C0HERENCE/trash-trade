@@ -19,7 +19,7 @@ from ..marketdata.buffer import (
     compute_min_bars,
     compute_warmup_bars,
 )
-from ..strategy import IStrategy
+from ..strategy import IStrategy, Indicators15m, Indicators1h, StrategyContext
 
 
 class MarketStateManager:
@@ -207,11 +207,108 @@ class MarketStateManager:
 
     async def on_kline_update(self, interval: str, bar: KlineBar) -> Dict[str, Any]:
         """处理 x=false 实时更新，返回可推送给前端的 payload。"""
-        raise NotImplementedError
+        if interval != "15m":
+            return {}
+        return {
+            "kline_15m": {
+                "t": bar.open_time,
+                "T": bar.close_time,
+                "o": bar.open,
+                "h": bar.high,
+                "l": bar.low,
+                "c": bar.close,
+                "v": bar.volume,
+                "x": bar.is_closed,
+            }
+        }
 
     async def on_kline_close(self, interval: str, bar: KlineBar) -> Dict[str, Any]:
         """
         处理收盘 K 线，返回 per-strategy 数据：
         {sid: {"ctx": StrategyContext, "conditions": {...}, "indicators": {...}}}
         """
-        raise NotImplementedError
+        if self.indicators is None:
+            return {}
+
+        result: Dict[str, Any] = {}
+        stream_updates: Dict[str, Any] = {}
+        snaps = self.indicators.update_on_close(interval, bar)
+
+        if interval == "1h":
+            for sid, snap in snaps.items():
+                if snap.ema_fast is None or snap.ema_slow is None or snap.rsi is None:
+                    continue
+                self.ind_1h_map[sid] = Indicators1h(
+                    ema20=snap.ema_fast,
+                    ema60=snap.ema_slow,
+                    rsi14=snap.rsi,
+                    close=bar.close,
+                )
+            first = next(iter(self.ind_1h_map.values()), None)
+            if first:
+                stream_updates["indicators_1h"] = {
+                    "ema20": first.ema20,
+                    "ema60": first.ema60,
+                    "rsi14": first.rsi14,
+                    "close": first.close,
+                }
+            return {"stream": stream_updates, "strategies": result}
+
+        if interval != "15m":
+            return {}
+
+        # per-strategy processing
+        for sid, snap in snaps.items():
+            ind1 = self.ind_1h_map.get(sid)
+            if snap is None or ind1 is None:
+                continue
+            if snap.ema_fast is None or snap.ema_slow is None:
+                continue
+
+            self.prev_ema20_15m[sid] = self.last_ema20_15m.get(sid)
+            self.prev_ema60_15m[sid] = self.last_ema60_15m.get(sid)
+            self.last_ema20_15m[sid] = snap.ema_fast
+            self.last_ema60_15m[sid] = snap.ema_slow
+
+            # store 15m indicators for stream (use latest computed snapshot)
+            stream_updates["indicators_15m"] = {
+                "ema20": snap.ema_fast,
+                "ema60": snap.ema_slow,
+                "rsi14": snap.rsi,
+                "macd_hist": snap.macd_hist,
+                "atr14": snap.atr,
+            }
+
+            prev_rsi = self.last_rsi_15m.get(sid, snap.rsi or 0.0)
+            prev_macd = self.prev_macd_hist_15m.get(sid, snap.macd_hist or 0.0)
+            prev2_macd = self.prev2_macd_hist_15m.get(sid, snap.macd_hist or 0.0)
+
+            ctx = StrategyContext(
+                price=bar.close,
+                close_15m=bar.close,
+                low_15m=bar.low,
+                high_15m=bar.high,
+                ind_15m=Indicators15m(
+                    ema20=snap.ema_fast,
+                    ema60=snap.ema_slow,
+                    rsi14=snap.rsi or 0.0,
+                    macd_hist=snap.macd_hist or 0.0,
+                ),
+                ind_1h=ind1,
+                prev_rsi_15m=prev_rsi,
+                prev_macd_hist_15m=prev_macd,
+                prev2_macd_hist_15m=prev2_macd,
+                prev_ema20_15m=self.prev_ema20_15m.get(sid),
+                prev_ema60_15m=self.prev_ema60_15m.get(sid),
+                atr14=snap.atr or 0.0,
+                structure_stop=None,
+                position=None,  # runtime 填充
+                cooldown_bars_remaining=0,  # runtime 填充
+            )
+            result[sid] = {"ctx": ctx, "indicators": stream_updates["indicators_15m"]}
+
+            self.last_rsi_15m[sid] = snap.rsi
+            self.prev2_macd_hist_15m[sid] = self.prev_macd_hist_15m.get(sid)
+            self.prev_macd_hist_15m[sid] = snap.macd_hist
+
+        return {"stream": stream_updates, "strategies": result}
