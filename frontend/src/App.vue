@@ -42,6 +42,7 @@ const ledgerPage = ref(0)
 const tradesHasMore = ref(false)
 const ledgerHasMore = ref(false)
 const pageSize = 20
+const loading = ref(false)
 
 const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4)
 const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--'
@@ -270,17 +271,20 @@ const handleStrategyChange = async (strategy) => {
   streamEvents.value = []
   tradesPage.value = 0
   ledgerPage.value = 0
-  
-  await loadStatus()
-  await loadEquitySpark()
-  await loadTrades(0)
-  await loadLedger(0)
-  await loadStats()
-  
-  stopStreams()
-  initWs()
-  initStatusWs()
-  startCountdown()
+  loading.value = true
+  try {
+    await loadStatus()
+    await loadEquitySpark()
+    await loadTrades(0)
+    await loadLedger(0)
+    await loadStats()
+    stopStreams()
+    initWs()
+    initStatusWs()
+    startCountdown()
+  } finally {
+    loading.value = false
+  }
 }
 
 onMounted(async () => {
@@ -296,14 +300,19 @@ onMounted(async () => {
   
   await loadStrategies()
   if (currentStrategy.value) {
-    await loadStatus()
-    await loadEquitySpark()
-    await loadTrades(0)
-    await loadLedger(0)
-    await loadStats()
-    initWs()
-    initStatusWs()
-    startCountdown()
+    loading.value = true
+    try {
+      await loadStatus()
+      await loadEquitySpark()
+      await loadTrades(0)
+      await loadLedger(0)
+      await loadStats()
+      initWs()
+      initStatusWs()
+      startCountdown()
+    } finally {
+      loading.value = false
+    }
   }
   
   // 再次滚动到顶部，确保所有组件加载完成后页面仍在顶部
@@ -337,6 +346,10 @@ const onLedgerRefresh = async () => {
 
 <template>
   <div class="app">
+    <div v-if="loading" class="overlay">
+      <div class="spinner"></div>
+      <div class="loading-text">加载中…</div>
+    </div>
     <Header 
       :strategies="strategies" 
       :current-strategy="currentStrategy" 
@@ -546,6 +559,37 @@ main > * {
 
 .btn:hover {
   border-color: #3a4155;
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 17, 21, 0.72);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 999;
+}
+
+.spinner {
+  width: 42px;
+  height: 42px;
+  border: 4px solid rgba(255, 255, 255, 0.15);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loading-text {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .table-scroll {
