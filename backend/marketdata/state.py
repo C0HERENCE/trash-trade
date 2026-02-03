@@ -12,7 +12,8 @@ MarketStateManager
 
 from typing import Dict, Any, Optional, Tuple
 
-from ..indicators import IndicatorEngine
+from ..indicators.engine import IndicatorEngine
+from ..indicators.legacy_adapter import build_specs_from_legacy
 from ..marketdata.buffer import (
     KlineBufferManager,
     KlineBar,
@@ -26,6 +27,7 @@ class MarketStateManager:
     def __init__(self) -> None:
         self.buffers: Optional[KlineBufferManager] = None
         self.indicators: Optional[IndicatorEngine] = None
+        self.indicator_specs: Dict[str, Any] = {}
         self.indicator_requirements: Dict[str, Dict[str, Dict]] = {}
         self.last_rsi_15m: Dict[str, Optional[float]] = {}
         self.prev_macd_hist_15m: Dict[str, Optional[float]] = {}
@@ -121,13 +123,16 @@ class MarketStateManager:
         if bars_1h:
             for bar in bars_1h:
                 snaps = self.indicators.update_on_close("1h", bar)
-                for sid, snap in snaps.items():
-                    if snap.ema_fast is None or snap.ema_slow is None or snap.rsi is None:
+                for sid, res_map in snaps.items():
+                    ema_fast = res_map.get("ema_fast", None)
+                    ema_slow = res_map.get("ema_slow", None)
+                    rsi_res = res_map.get("rsi", None)
+                    if ema_fast is None or ema_slow is None or rsi_res is None or ema_fast.value is None or ema_slow.value is None or rsi_res.value is None:
                         continue
                     self.ind_1h_map[sid] = {
-                        "ema20": snap.ema_fast,
-                        "ema60": snap.ema_slow,
-                        "rsi14": snap.rsi,
+                        "ema20": ema_fast.value,
+                        "ema60": ema_slow.value,
+                        "rsi14": rsi_res.value,
                         "close": bar.close,
                     }
 
@@ -139,22 +144,32 @@ class MarketStateManager:
             for bar in bars_15m:
                 last_bar_15m = bar
                 snaps = self.indicators.update_on_close("15m", bar)
-                for sid, snap in snaps.items():
-                    if snap.ema_fast is None or snap.ema_slow is None:
+                for sid, res_map in snaps.items():
+                    ema_fast = res_map.get("ema_fast", None)
+                    ema_slow = res_map.get("ema_slow", None)
+                    rsi_res = res_map.get("rsi", None)
+                    macd_res = res_map.get("macd_hist", None)
+                    atr_res = res_map.get("atr", None)
+                    if ema_fast is None or ema_slow is None or ema_fast.value is None or ema_slow.value is None:
                         continue
                     self.prev_ema20_15m[sid] = self.last_ema20_15m.get(sid)
                     self.prev_ema60_15m[sid] = self.last_ema60_15m.get(sid)
-                    self.last_ema20_15m[sid] = snap.ema_fast
-                    self.last_ema60_15m[sid] = snap.ema_slow
-                    last_snap_15m = snap
+                    self.last_ema20_15m[sid] = ema_fast.value
+                    self.last_ema60_15m[sid] = ema_slow.value
+                    last_snap_15m = type("Snap", (), {})()
+                    last_snap_15m.ema_fast = ema_fast.value
+                    last_snap_15m.ema_slow = ema_slow.value
+                    last_snap_15m.rsi = rsi_res.value if rsi_res else None
+                    last_snap_15m.macd_hist = macd_res.value if macd_res else None
+                    last_snap_15m.atr = atr_res.value if atr_res else None
                     if self.last_rsi_15m.get(sid) is None:
-                        self.last_rsi_15m[sid] = snap.rsi
-                        self.prev_macd_hist_15m[sid] = snap.macd_hist
-                        self.prev2_macd_hist_15m[sid] = snap.macd_hist
+                        self.last_rsi_15m[sid] = last_snap_15m.rsi
+                        self.prev_macd_hist_15m[sid] = last_snap_15m.macd_hist
+                        self.prev2_macd_hist_15m[sid] = last_snap_15m.macd_hist
                     else:
                         self.prev2_macd_hist_15m[sid] = self.prev_macd_hist_15m.get(sid)
-                        self.prev_macd_hist_15m[sid] = snap.macd_hist
-                        self.last_rsi_15m[sid] = snap.rsi
+                        self.prev_macd_hist_15m[sid] = last_snap_15m.macd_hist
+                        self.last_rsi_15m[sid] = last_snap_15m.rsi
 
         # 推送初始快照
         if stream_store is not None:
@@ -236,12 +251,15 @@ class MarketStateManager:
 
         if interval == "1h":
             for sid, snap in snaps.items():
-                if snap.ema_fast is None or snap.ema_slow is None or snap.rsi is None:
+                ema_fast = snap.get("ema_fast")
+                ema_slow = snap.get("ema_slow")
+                rsi_res = snap.get("rsi")
+                if not ema_fast or not ema_slow or not rsi_res:
                     continue
                 self.ind_1h_map[sid] = Indicators1h(
-                    ema20=snap.ema_fast,
-                    ema60=snap.ema_slow,
-                    rsi14=snap.rsi,
+                    ema20=ema_fast.value,
+                    ema60=ema_slow.value,
+                    rsi14=rsi_res.value,
                     close=bar.close,
                 )
             first = next(iter(self.ind_1h_map.values()), None)
@@ -258,47 +276,52 @@ class MarketStateManager:
             return {}
 
         # per-strategy processing
-        for sid, snap in snaps.items():
+        for sid, res_map in snaps.items():
             ind1 = self.ind_1h_map.get(sid)
-            if snap is None or ind1 is None:
+            if res_map is None or ind1 is None:
                 continue
-            if snap.ema_fast is None or snap.ema_slow is None:
+            ema_fast = res_map.get("ema_fast")
+            ema_slow = res_map.get("ema_slow")
+            rsi_res = res_map.get("rsi")
+            macd_res = res_map.get("macd_hist")
+            atr_res = res_map.get("atr")
+            if not ema_fast or not ema_slow:
                 continue
 
             self.prev_ema20_15m[sid] = self.last_ema20_15m.get(sid)
             self.prev_ema60_15m[sid] = self.last_ema60_15m.get(sid)
-            self.last_ema20_15m[sid] = snap.ema_fast
-            self.last_ema60_15m[sid] = snap.ema_slow
+            self.last_ema20_15m[sid] = ema_fast.value
+            self.last_ema60_15m[sid] = ema_slow.value
 
             # store 15m indicators for stream (use latest computed snapshot)
             stream_updates["indicators_15m"] = {
-                "ema20": snap.ema_fast,
-                "ema60": snap.ema_slow,
-                "rsi14": snap.rsi,
-                "macd_hist": snap.macd_hist,
-                "atr14": snap.atr,
+                "ema20": ema_fast.value if ema_fast else None,
+                "ema60": ema_slow.value if ema_slow else None,
+                "rsi14": rsi_res.value if rsi_res else None,
+                "macd_hist": macd_res.value if macd_res else None,
+                "atr14": atr_res.value if atr_res else None,
             }
 
-            prev_rsi = self.last_rsi_15m.get(sid, snap.rsi or 0.0)
-            prev_macd = self.prev_macd_hist_15m.get(sid, snap.macd_hist or 0.0)
-            prev2_macd = self.prev2_macd_hist_15m.get(sid, snap.macd_hist or 0.0)
+            prev_rsi = self.last_rsi_15m.get(sid, rsi_res.value if rsi_res else 0.0)
+            prev_macd = self.prev_macd_hist_15m.get(sid, macd_res.value if macd_res else 0.0)
+            prev2_macd = self.prev2_macd_hist_15m.get(sid, macd_res.value if macd_res else 0.0)
 
             indicators_map = {
-                "ema20_15m": snap.ema_fast,
-                "ema60_15m": snap.ema_slow,
-                "rsi14_15m": snap.rsi,
-                "macd_hist_15m": snap.macd_hist,
-                "atr14_15m": snap.atr,
+                "ema20_15m": ema_fast.value if ema_fast else None,
+                "ema60_15m": ema_slow.value if ema_slow else None,
+                "rsi14_15m": rsi_res.value if rsi_res else None,
+                "macd_hist_15m": macd_res.value if macd_res else None,
+                "atr14_15m": atr_res.value if atr_res else None,
                 "ema20_1h": ind1.ema20,
                 "ema60_1h": ind1.ema60,
                 "rsi14_1h": ind1.rsi14,
                 "close_1h": ind1.close,
             }
             history_map = {
-                "rsi14_15m": [prev_rsi, snap.rsi],
-                "macd_hist_15m": [prev2_macd, prev_macd, snap.macd_hist],
-                "ema20_15m": [self.prev_ema20_15m.get(sid), snap.ema_fast],
-                "ema60_15m": [self.prev_ema60_15m.get(sid), snap.ema_slow],
+                "rsi14_15m": [prev_rsi, rsi_res.value if rsi_res else None],
+                "macd_hist_15m": [prev2_macd, prev_macd, macd_res.value if macd_res else None],
+                "ema20_15m": [self.prev_ema20_15m.get(sid), ema_fast.value if ema_fast else None],
+                "ema60_15m": [self.prev_ema60_15m.get(sid), ema_slow.value if ema_slow else None],
             }
 
             ctx = StrategyContext(

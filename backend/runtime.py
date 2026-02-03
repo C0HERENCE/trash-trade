@@ -13,7 +13,8 @@ import yaml
 from .alerts import AlertManager
 from .config import Settings
 from .db import Database
-from .indicators import IndicatorEngine
+from .indicators.engine import IndicatorEngine
+from .indicators.legacy_adapter import build_specs_from_legacy
 from .marketdata.buffer import (
     KlineBar,
     KlineBufferManager,
@@ -204,7 +205,9 @@ class RuntimeEngine:
             )
 
         self._state_mgr.buffers = self._buffers
-        self._state_mgr.indicators = IndicatorEngine(self._state_mgr.indicator_requirements)
+        # build indicator specs from (legacy) requirements
+        self._state_mgr.indicator_specs = build_specs_from_legacy(self._state_mgr.indicator_requirements)
+        self._state_mgr.indicators = IndicatorEngine(self._state_mgr.indicator_specs)
 
         # Prime indicators and last-condition snapshot from history
         await self._state_mgr.prime_from_history(self._strategies, self._stream_store)
