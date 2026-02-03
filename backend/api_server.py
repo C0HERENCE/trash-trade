@@ -118,7 +118,8 @@ class StreamStore:
             if last_signal is not None:
                 self._snapshot.last_signal = last_signal
             if conditions is not None and isinstance(conditions, dict):
-                self._snapshot.conditions.update(conditions)
+                for k, v in conditions.items():
+                    self._snapshot.conditions[k] = v or {"long": [], "short": []}
             self._snapshot.ts = int(time.time() * 1000)
 
     async def add_event(self, event: Dict[str, Any]) -> None:
@@ -215,9 +216,9 @@ def _status_to_dict(s: RuntimeStatus) -> Dict[str, Any]:
 
 def _stream_to_dict(s: StreamSnapshot, events: List[Dict[str, Any]], sid: Optional[str]) -> Dict[str, Any]:
     # Use short keys to reduce payload size
-    cond = None
-    if sid and s.conditions:
-        cond = s.conditions.get(sid)
+    cond = {"long": [], "short": []}
+    if sid and s.conditions and s.conditions.get(sid):
+        cond = s.conditions.get(sid) or {"long": [], "short": []}
     sig = None
     if cond is not None:
         sig = {"t": "cond", "sid": sid, "c": cond}
