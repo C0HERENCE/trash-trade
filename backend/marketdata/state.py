@@ -114,7 +114,13 @@ class MarketStateManager:
                 if snaps:
                     # take first strategy as representative for initial snapshot
                     first_sid, res_map = next(iter(snaps.items()))
-                    last_ind_map = {name: res.value for name, res in res_map.items() if res}
+                    last_ind_map = {
+                        "ema20": (res_map.get("ema20_15m").value if res_map.get("ema20_15m") else None),
+                        "ema60": (res_map.get("ema60_15m").value if res_map.get("ema60_15m") else None),
+                        "rsi14": (res_map.get("rsi14_15m").value if res_map.get("rsi14_15m") else None),
+                        "macd_hist": (res_map.get("macd_hist_15m").value if res_map.get("macd_hist_15m") else None),
+                        "atr14": (res_map.get("atr14_15m").value if res_map.get("atr14_15m") else None),
+                    }
 
         # 推送初始快照
         if stream_store is not None:
@@ -209,8 +215,14 @@ class MarketStateManager:
                 name: res.history for name, res in res_map.items() if res is not None and res.history
             }
 
-            # store minimal stream snapshot (use full map for flexibility)
-            stream_updates["indicators_15m"] = indicators_map
+            # UI-friendly snapshot (default to 15m keys if present)
+            stream_updates["indicators_15m"] = {
+                "ema20": indicators_map.get("ema20_15m"),
+                "ema60": indicators_map.get("ema60_15m"),
+                "rsi14": indicators_map.get("rsi14_15m"),
+                "macd_hist": indicators_map.get("macd_hist_15m"),
+                "atr14": indicators_map.get("atr14_15m"),
+            }
 
             ctx = StrategyContext(
                 timestamp=bar.close_time,
