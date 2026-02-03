@@ -27,20 +27,6 @@ def _macd_hist_decreasing(prev2: float, prev1: float, curr: float) -> bool:
     return prev2 > prev1 > curr
 
 
-def _trend_filter_long(ind_1h: Indicators1h, trend_strength_min: float) -> bool:
-    if not (ind_1h.close > ind_1h.ema60 and ind_1h.ema20 > ind_1h.ema60 and ind_1h.rsi14 > 50):
-        return False
-    strength = abs(ind_1h.ema20 - ind_1h.ema60) / ind_1h.close
-    return strength >= trend_strength_min
-
-
-def _trend_filter_short(ind_1h: Indicators1h, trend_strength_min: float) -> bool:
-    if not (ind_1h.close < ind_1h.ema60 and ind_1h.ema20 < ind_1h.ema60 and ind_1h.rsi14 < 50):
-        return False
-    strength = abs(ind_1h.ema20 - ind_1h.ema60) / ind_1h.close
-    return strength >= trend_strength_min
-
-
 def _choose_stop_long(entry: float, atr: float, structure_stop: float | None, atr_mult: float) -> float:
     atr_stop = entry - atr_mult * atr
     if structure_stop is None:
@@ -210,8 +196,22 @@ def _on_15m_close(ctx: StrategyContext) -> EntrySignal | ExitAction | None:
 
     params = ctx.meta.get("params", {})
     trend_strength_min = params.get("trend_strength_min", 0.0)
-    allow_long = _trend_filter_long(ctx.ind_1h, trend_strength_min)
-    allow_short = _trend_filter_short(ctx.ind_1h, trend_strength_min)
+    ind1_close = ctx.ind("close_1h")
+    ind1_ema20 = ctx.ind("ema20_1h")
+    ind1_ema60 = ctx.ind("ema60_1h")
+    ind1_rsi = ctx.ind("rsi14_1h")
+    allow_long = (
+        (ind1_close or 0) > (ind1_ema60 or 0)
+        and (ind1_ema20 or 0) > (ind1_ema60 or 0)
+        and (ind1_rsi or 0) > 50
+        and abs((ind1_ema20 or 0) - (ind1_ema60 or 0)) / (ind1_close or 1) >= trend_strength_min
+    )
+    allow_short = (
+        (ind1_close or 0) < (ind1_ema60 or 0)
+        and (ind1_ema20 or 0) < (ind1_ema60 or 0)
+        and (ind1_rsi or 0) < 50
+        and abs((ind1_ema20 or 0) - (ind1_ema60 or 0)) / (ind1_close or 1) >= trend_strength_min
+    )
 
     # Long setup
     if allow_long:
