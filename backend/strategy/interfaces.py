@@ -55,8 +55,8 @@ class StrategyContext:
     structure_stop: Optional[float] = None
 
     # position + cooldown
-    position: Optional[PositionState]
-    cooldown_bars_remaining: int
+    position: Optional[PositionState] = None
+    cooldown_bars_remaining: int = 0
 
     # params
     trend_strength_min: float
