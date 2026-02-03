@@ -410,6 +410,13 @@ class RuntimeEngine:
         )
         await self._handle_realtime(bar)
 
+    async def _handle_realtime(self, bar: KlineBar) -> None:
+        """
+        Placeholder for real-time tick/partial-bar handling.
+        Current strategies只在收盘做决策，实时仅用于前端展示和潜在止盈止损扩展。
+        """
+        return
+
     async def _on_kline_close(self, interval: str, bar: KlineBar) -> None:
         if self._indicators is None:
             return
