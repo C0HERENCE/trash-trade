@@ -4,7 +4,7 @@ import asyncio
 import logging
 import httpx
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional, Dict, Any, Iterable
 from pathlib import Path
 
@@ -59,6 +59,7 @@ class RuntimeEngine:
         self._indicators: Optional[IndicatorEngine] = None
         self._ws: Optional[BinanceWsClient] = None
         self._state_mgr = MarketStateManager()
+        self._last_ctx: dict[str, StrategyContext] = {}
 
         # multi-strategy containers
         self._strategies: dict[str, IStrategy] = {}
@@ -206,9 +207,38 @@ class RuntimeEngine:
         self._state_mgr.buffers = self._buffers
         # build indicator specs from (legacy) requirements
         self._state_mgr.indicators = IndicatorEngine(self._state_mgr.indicator_specs)
+        self._indicators = self._state_mgr.indicators
 
         # Prime indicators and last-condition snapshot from history
-        await self._state_mgr.prime_from_history(self._strategies, self._stream_store)
+        prime_res = await self._state_mgr.prime_from_history(self._strategies, self._stream_store)
+        self._last_ctx = prime_res.get("ctx_map", {}) if isinstance(prime_res, dict) else {}
+        # 推送一次初始化的条件（若已有历史）
+        if self._last_ctx:
+            cond_updates: dict[str, dict] = {}
+            for sid, ctx in self._last_ctx.items():
+                strat = self._strategies[sid]
+                ctx.position = self._positions.get(sid)
+                ctx.cooldown_bars_remaining = self._cooldowns.get(sid, 0)
+                ctx.meta["params"] = self._profiles[sid].get("strategy", {})
+                ind_ready = self._state_mgr.ind_1h_map.get(sid) is not None or all(
+                    k in (ctx.indicators or {}) for k in ("ema20_1h", "ema60_1h", "rsi14_1h", "close_1h")
+                )
+                try:
+                    conditions = strat.describe_conditions(
+                        ctx=ctx,
+                        ind_1h_ready=ind_ready,
+                        has_position=self._positions.get(sid) is not None,
+                        cooldown_bars=self._cooldowns.get(sid, 0),
+                    )
+                except Exception as exc:
+                    logger.exception("describe_conditions failed (prime) for %s", sid)
+                    conditions = {
+                        "long": [{"direction": "LONG", "timeframe": "15m", "ok": False, "desc": f"条件计算异常: {exc}"}],
+                        "short": [{"direction": "SHORT", "timeframe": "15m", "ok": False, "desc": f"条件计算异常: {exc}"}],
+                    }
+                cond_updates[sid] = conditions
+            if cond_updates:
+                await self._stream_store.update_snapshot(conditions=cond_updates)
 
         reconnect = WsReconnectPolicy(
             max_retries=self._settings.binance.ws_reconnect.max_retries,
@@ -284,8 +314,78 @@ class RuntimeEngine:
 
     async def _on_kline_update(self, interval: str, bar: KlineBar) -> None:
         payload = await self._state_mgr.on_kline_update(interval, bar)
-        if payload:
-            await self._stream_store.update_snapshot(**payload)
+        stream_updates = payload or {}
+        if interval != "15m":
+            if stream_updates:
+                await self._stream_store.update_snapshot(**stream_updates)
+            return
+        preview_maps = self._indicators.preview(interval, bar) if self._indicators else {}
+        # pick one indicators map for streaming (for charts)
+        if preview_maps:
+            first_sid, res_map = next(iter(preview_maps.items()))
+            if res_map:
+                stream_updates["indicators_15m"] = {k: v.value for k, v in res_map.items() if v is not None}
+                stream_updates["kline_15m"] = {
+                    "t": bar.open_time,
+                    "T": bar.close_time,
+                    "o": bar.open,
+                    "h": bar.high,
+                    "l": bar.low,
+                    "c": bar.close,
+                    "v": bar.volume,
+                    "x": bar.is_closed,
+                }
+        cond_updates: dict[str, dict] = {}
+        for sid, strat in self._strategies.items():
+            base_ctx = self._last_ctx.get(sid)
+            if base_ctx is None:
+                # 尚未有首根收盘，给出占位条件，避免前端空白
+                cond_updates[sid] = {
+                    "long": [{"direction": "LONG", "timeframe": "15m", "ok": False, "desc": "等待首根15m收盘"}],
+                    "short": [{"direction": "SHORT", "timeframe": "15m", "ok": False, "desc": "等待首根15m收盘"}],
+                }
+                continue
+            ctx = replace(
+                base_ctx,
+                timestamp=bar.close_time,
+                interval=interval,
+                price=bar.close,
+                close_15m=bar.close,
+                low_15m=bar.low,
+                high_15m=bar.high,
+            )
+            # merge preview indicators
+            preview_res = preview_maps.get(sid) or {}
+            if preview_res:
+                ind_copy = dict(ctx.indicators)
+                ind_copy.update({k: v.value for k, v in preview_res.items()})
+                ind_copy["close_15m"] = bar.close
+                ctx = replace(ctx, indicators=ind_copy)
+            ctx.position = self._positions.get(sid)
+            ctx.cooldown_bars_remaining = self._cooldowns.get(sid, 0)
+            strategy_cfg = self._profiles[sid].get("strategy", {})
+            ctx.meta["params"] = strategy_cfg
+            ind_ready = self._state_mgr.ind_1h_map.get(sid) is not None or all(
+                k in (ctx.indicators or {}) for k in ("ema20_1h", "ema60_1h", "rsi14_1h", "close_1h")
+            )
+            try:
+                conditions = strat.describe_conditions(
+                    ctx=ctx,
+                    ind_1h_ready=ind_ready,
+                    has_position=self._positions.get(sid) is not None,
+                    cooldown_bars=self._cooldowns.get(sid, 0),
+                )
+            except Exception as exc:
+                logger.exception("describe_conditions failed (update) for %s", sid)
+                conditions = {
+                    "long": [{"label": "条件计算异常", "ok": False, "desc": str(exc)}],
+                    "short": [{"label": "条件计算异常", "ok": False, "desc": str(exc)}],
+                }
+            cond_updates[sid] = conditions
+        if cond_updates:
+            stream_updates["conditions"] = cond_updates
+        if stream_updates:
+            await self._stream_store.update_snapshot(**stream_updates)
 
     async def _on_kline_close(self, interval: str, bar: KlineBar) -> None:
         res = await self._state_mgr.on_kline_close(interval, bar)
@@ -304,11 +404,15 @@ class RuntimeEngine:
             ctx.cooldown_bars_remaining = self._cooldowns.get(sid, 0)
             strategy_cfg = self._profiles[sid].get("strategy", {})
             ctx.meta["params"] = strategy_cfg
+            self._last_ctx[sid] = ctx
 
+            ind_ready = self._state_mgr.ind_1h_map.get(sid) is not None or all(
+                k in (ctx.indicators or {}) for k in ("ema20_1h", "ema60_1h", "rsi14_1h", "close_1h")
+            )
             try:
                 conditions = strat.describe_conditions(
                     ctx=ctx,
-                    ind_1h_ready=self._state_mgr.ind_1h_map.get(sid) is not None,
+                    ind_1h_ready=ind_ready,
                     has_position=self._positions.get(sid) is not None,
                     cooldown_bars=self._cooldowns.get(sid, 0),
                 )

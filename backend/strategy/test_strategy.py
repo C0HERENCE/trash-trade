@@ -1,14 +1,6 @@
 from __future__ import annotations
 
-from .interfaces import (
-    EntrySignal,
-    ExitAction,
-    IStrategy,
-    Indicators15m,
-    Indicators1h,
-    PositionState,
-    StrategyContext,
-)
+from .interfaces import EntrySignal, ExitAction, IStrategy, StrategyContext
 
 
 def _rsi_cross_up(prev_rsi: float, rsi: float, level: float = 50.0) -> bool:
@@ -96,74 +88,135 @@ class TestStrategy(IStrategy):
         }
 
     def describe_conditions(self, ctx: StrategyContext, ind_1h_ready: bool, has_position: bool, cooldown_bars: int) -> dict:
-        def item(label, ok, value=None, target=None, info=None, slope=None):
-            return {"label": label, "ok": ok, "value": value, "target": target, "info": info, "slope": slope}
+        def item(direction: str, tf: str, ok: bool, desc: str, value=None, target=None):
+            d = {"direction": direction, "timeframe": tf, "ok": bool(ok), "desc": desc, "label": f"[{tf}]{desc}"}
+            if value is not None:
+                d["value"] = value
+            if target is not None:
+                d["target"] = target
+            return d
 
         if not ind_1h_ready:
-            return {"long": [item("1h指标未就绪", False)], "short": [item("1h指标未就绪", False)]}
+            return {
+                "long": [item("LONG", "1h", False, "1h指标未就绪")],
+                "short": [item("SHORT", "1h", False, "1h指标未就绪")],
+            }
         if has_position:
-            return {"long": [item("已有持仓", False)], "short": [item("已有持仓", False)]}
+            return {
+                "long": [item("LONG", "15m", False, "已有持仓")],
+                "short": [item("SHORT", "15m", False, "已有持仓")],
+            }
         if cooldown_bars > 0:
             label = f"冷却中({cooldown_bars})"
-            return {"long": [item(label, False)], "short": [item(label, False)]}
+            return {
+                "long": [item("LONG", "15m", False, label)],
+                "short": [item("SHORT", "15m", False, label)],
+            }
 
-        ind1_close = ctx.ind("close_1h")
-        ind1_ema20 = ctx.ind("ema20_1h")
-        ind1_ema60 = ctx.ind("ema60_1h")
-        ind1_rsi = ctx.ind("rsi14_1h")
-
-        ind15_low = ctx.low_15m
-        ind15_high = ctx.high_15m
-        ind15_close = ctx.close_15m
-        rsi_curr = ctx.ind("rsi14_15m")
-        rsi_prev1 = ctx.prev("rsi14_15m", 1, None)
-        rsi_prev2 = ctx.prev("rsi14_15m", 2, None)
-        macd_curr = ctx.ind("macd_hist_15m")
-        macd_prev1 = ctx.prev("macd_hist_15m", 2, None)
-        macd_prev2 = ctx.prev("macd_hist_15m", 3, None)
-        atr15 = ctx.ind("atr14_15m")
-        ema20 = ctx.ind("ema20_15m")
-        ema60 = ctx.ind("ema60_15m")
-        ema20_prev = ctx.prev("ema20_15m", 1, None)
-        ema60_prev = ctx.prev("ema60_15m", 1, None)
-        params = ctx.meta.get("params", {})
+        params = ctx.meta.get("params", {}) or {}
         trend_strength_min = params.get("trend_strength_min", 0.0)
         rsi_long_lower = params.get("rsi_long_lower", 50.0)
         rsi_long_upper = params.get("rsi_long_upper", 60.0)
         rsi_short_upper = params.get("rsi_short_upper", 50.0)
         rsi_short_lower = params.get("rsi_short_lower", 40.0)
         rsi_slope_required = params.get("rsi_slope_required", False)
-        atr_mult = params.get("atr_stop_mult", 1.5)
 
-        cond_long = []
-        cond_short = []
+        cond_long: list[dict] = []
+        cond_short: list[dict] = []
 
-        long_dir = (ind1_close or 0) > (ind1_ema60 or 0) and (ind1_ema20 or 0) > (ind1_ema60 or 0) and (ind1_rsi or 0) > 50
-        short_dir = (ind1_close or 0) < (ind1_ema60 or 0) and (ind1_ema20 or 0) < (ind1_ema60 or 0) and (ind1_rsi or 0) < 50
-        cond_long.append(item("1h方向过滤", long_dir, info=f"close:{(ind1_close or 0):.2f}, ema60:{(ind1_ema60 or 0):.2f}, ema20:{(ind1_ema20 or 0):.2f}, rsi:{(ind1_rsi or 0):.2f}"))
-        cond_short.append(item("1h方向过滤", short_dir, info=f"close:{(ind1_close or 0):.2f}, ema60:{(ind1_ema60 or 0):.2f}, ema20:{(ind1_ema20 or 0):.2f}, rsi:{(ind1_rsi or 0):.2f}"))
+        close_1h = ctx.ind("close_1h")
+        ema20_1h = ctx.ind("ema20_1h")
+        ema60_1h = ctx.ind("ema60_1h")
+        rsi1h = ctx.ind("rsi14_1h")
+        fmt = lambda v, nd=2: f"{v:.{nd}f}" if v is not None else "n/a"
 
-        strength = abs((ind1_ema20 or 0) - (ind1_ema60 or 0)) / (ind1_close or 1)
+        long_dir = (close_1h or 0) > (ema60_1h or 0) and (ema20_1h or 0) > (ema60_1h or 0) and (rsi1h or 0) > 50
+        short_dir = (close_1h or 0) < (ema60_1h or 0) and (ema20_1h or 0) < (ema60_1h or 0) and (rsi1h or 0) < 50
+        cond_long.append(
+            item(
+                "LONG",
+                "1h",
+                long_dir,
+                f"1h方向 close={fmt(close_1h)} ema20={fmt(ema20_1h)} ema60={fmt(ema60_1h)} rsi={fmt(rsi1h,1)}",
+            )
+        )
+        cond_short.append(
+            item(
+                "SHORT",
+                "1h",
+                short_dir,
+                f"1h方向 close={fmt(close_1h)} ema20={fmt(ema20_1h)} ema60={fmt(ema60_1h)} rsi={fmt(rsi1h,1)}",
+            )
+        )
+
+        strength = abs((ema20_1h or 0) - (ema60_1h or 0)) / (close_1h or 1)
         strength_ok = strength >= trend_strength_min
-        cond_long.append(item("1h趋势强度", strength_ok, value=strength, target=f">={trend_strength_min:.4f}"))
-        cond_short.append(item("1h趋势强度", strength_ok, value=strength, target=f">={trend_strength_min:.4f}"))
+        cond_long.append(item("LONG", "1h", strength_ok, "趋势强度", value=strength, target=f">={trend_strength_min:.4f}"))
+        cond_short.append(item("SHORT", "1h", strength_ok, "趋势强度", value=strength, target=f">={trend_strength_min:.4f}"))
 
-        ema20 = ctx.ind("ema20_15m", ema20)
-        ema60 = ctx.ind("ema60_15m", ema60)
-        price_long = ctx.low_15m <= (ema20 or ctx.low_15m) and ctx.close_15m > (ema60 or ctx.close_15m)
-        price_short = ctx.high_15m >= (ema20 or ctx.high_15m) and ctx.close_15m < (ema60 or ctx.close_15m)
-        cond_long.append(item("15m价位条件", price_long, info=f"low:{ctx.low_15m:.2f}, ema20:{(ema20 or 0):.2f}, close:{ctx.close_15m:.2f}, ema60:{(ema60 or 0):.2f}"))
-        cond_short.append(item("15m价位条件", price_short, info=f"high:{ctx.high_15m:.2f}, ema20:{(ema20 or 0):.2f}, close:{ctx.close_15m:.2f}, ema60:{(ema60 or 0):.2f}"))
+        ema20_15m = ctx.ind("ema20_15m")
+        ema60_15m = ctx.ind("ema60_15m")
+        price_long = ctx.low_15m <= (ema20_15m or ctx.low_15m) and ctx.close_15m > (ema60_15m or ctx.close_15m)
+        price_short = ctx.high_15m >= (ema20_15m or ctx.high_15m) and ctx.close_15m < (ema60_15m or ctx.close_15m)
+        cond_long.append(
+            item(
+                "LONG",
+                "15m",
+                price_long,
+                f"价位 low<=ema20({fmt(ema20_15m)}) & close>{fmt(ema60_15m)}",
+            )
+        )
+        cond_short.append(
+            item(
+                "SHORT",
+                "15m",
+                price_short,
+                f"价位 high>=ema20({fmt(ema20_15m)}) & close<{fmt(ema60_15m)}",
+            )
+        )
 
-        rsi_slope_up = (rsi_prev1 is not None) and (rsi_curr is not None) and (rsi_curr > rsi_prev1)
-        rsi_slope_down = (rsi_prev1 is not None) and (rsi_curr is not None) and (rsi_curr < rsi_prev1)
-        rsi_band_long = rsi_curr is not None and rsi_long_lower <= rsi_curr <= rsi_long_upper
-        rsi_band_short = rsi_curr is not None and rsi_short_lower <= rsi_curr <= rsi_short_upper
-        cond_long.append(item("RSI区间/斜率(多)", rsi_band_long and (not rsi_slope_required or rsi_slope_up), value=rsi_curr, target=f"{rsi_long_lower}-{rsi_long_upper}", slope=(rsi_curr or 0) - (rsi_prev1 or 0)))
-        cond_short.append(item("RSI区间/斜率(空)", rsi_band_short and (not rsi_slope_required or rsi_slope_down), value=rsi_curr, target=f"{rsi_short_lower}-{rsi_short_upper}", slope=(rsi_curr or 0) - (rsi_prev1 or 0)))
+        rsi_curr = ctx.ind("rsi14_15m")
+        rsi_prev = ctx.prev("rsi14_15m", 1, None)
+        rsi_delta = (rsi_curr - rsi_prev) if (rsi_curr is not None and rsi_prev is not None) else None
+        rsi_long_ok = rsi_curr is not None and rsi_long_lower <= rsi_curr <= rsi_long_upper
+        rsi_short_ok = rsi_curr is not None and rsi_short_lower <= rsi_curr <= rsi_short_upper
+        if rsi_slope_required and rsi_delta is not None:
+            rsi_long_ok = rsi_long_ok and rsi_delta > 0
+            rsi_short_ok = rsi_short_ok and rsi_delta < 0
+        rsi_desc_long = f"RSI {fmt(rsi_curr,2)} in [{rsi_long_lower},{rsi_long_upper}] Δ={rsi_delta}"
+        rsi_desc_short = f"RSI {fmt(rsi_curr,2)} in [{rsi_short_lower},{rsi_short_upper}] Δ={rsi_delta}"
+        cond_long.append(
+            item("LONG", "15m", rsi_long_ok, rsi_desc_long)
+        )
+        cond_short.append(
+            item("SHORT", "15m", rsi_short_ok, rsi_desc_short)
+        )
 
-        cond_long.append(item("MACD柱连续上升", _macd_hist_increasing(macd_prev2 or 0, macd_prev1 or 0, macd_curr or 0), value=macd_curr, info=f"prev2:{(macd_prev2 or 0):.3f}, prev1:{(macd_prev1 or 0):.3f}"))
-        cond_short.append(item("MACD柱连续下降", _macd_hist_decreasing(macd_prev2 or 0, macd_prev1 or 0, macd_curr or 0), value=macd_curr, info=f"prev2:{(macd_prev2 or 0):.3f}, prev1:{(macd_prev1 or 0):.3f}"))
+        macd_curr = ctx.ind("macd_hist_15m")
+        macd_prev1 = ctx.prev("macd_hist_15m", 1, None)
+        macd_prev2 = ctx.prev("macd_hist_15m", 2, None)
+        macd_up = macd_curr is not None and macd_prev1 is not None and macd_prev2 is not None and _macd_hist_increasing(
+            macd_prev2, macd_prev1, macd_curr
+        )
+        macd_down = macd_curr is not None and macd_prev1 is not None and macd_prev2 is not None and _macd_hist_decreasing(
+            macd_prev2, macd_prev1, macd_curr
+        )
+        cond_long.append(
+            item(
+                "LONG",
+                "15m",
+                macd_up,
+                f"MACD柱上升 p2={fmt(macd_prev2,3)} p1={fmt(macd_prev1,3)} now={fmt(macd_curr,3)}",
+            )
+        )
+        cond_short.append(
+            item(
+                "SHORT",
+                "15m",
+                macd_down,
+                f"MACD柱下降 p2={fmt(macd_prev2,3)} p1={fmt(macd_prev1,3)} now={fmt(macd_curr,3)}",
+            )
+        )
 
         return {"long": cond_long, "short": cond_short}
 
@@ -179,14 +232,25 @@ class TestStrategy(IStrategy):
 
 
 def _on_15m_close(ctx: StrategyContext) -> EntrySignal | ExitAction | None:
+    params = ctx.meta.get("params", {}) or {}
+    trend_strength_min = params.get("trend_strength_min", 0.0)
+    rsi_long_lower = params.get("rsi_long_lower", 50.0)
+    rsi_long_upper = params.get("rsi_long_upper", 60.0)
+    rsi_short_upper = params.get("rsi_short_upper", 50.0)
+    rsi_short_lower = params.get("rsi_short_lower", 40.0)
+    rsi_slope_required = params.get("rsi_slope_required", False)
+    atr_mult = params.get("atr_stop_mult", 1.5)
+
     # If position open, evaluate trend-failure exit on close
     if ctx.position is not None:
         pos = ctx.position
+        ema20 = ctx.ind("ema20_15m")
+        rsi14 = ctx.ind("rsi14_15m")
         if pos.side == "LONG":
-            if ctx.close_15m < ctx.ind_15m.ema20 and ctx.ind_15m.rsi14 < 50:
+            if ctx.close_15m < (ema20 or ctx.close_15m) and (rsi14 or 0) < 50:
                 return ExitAction(action="CLOSE_ALL", price=ctx.close_15m, reason="trend_fail")
         else:
-            if ctx.close_15m > ctx.ind_15m.ema20 and ctx.ind_15m.rsi14 > 50:
+            if ctx.close_15m > (ema20 or ctx.close_15m) and (rsi14 or 0) > 50:
                 return ExitAction(action="CLOSE_ALL", price=ctx.close_15m, reason="trend_fail")
         return None
 
@@ -194,8 +258,6 @@ def _on_15m_close(ctx: StrategyContext) -> EntrySignal | ExitAction | None:
     if ctx.cooldown_bars_remaining > 0:
         return None
 
-    params = ctx.meta.get("params", {})
-    trend_strength_min = params.get("trend_strength_min", 0.0)
     ind1_close = ctx.ind("close_1h")
     ind1_ema20 = ctx.ind("ema20_1h")
     ind1_ema60 = ctx.ind("ema60_1h")
@@ -218,8 +280,8 @@ def _on_15m_close(ctx: StrategyContext) -> EntrySignal | ExitAction | None:
         rsi_curr = ctx.ind("rsi14_15m")
         rsi_prev = ctx.prev("rsi14_15m", 1, None)
         macd_curr = ctx.ind("macd_hist_15m")
-        macd_prev1 = ctx.prev("macd_hist_15m", 2, None)
-        macd_prev2 = ctx.prev("macd_hist_15m", 3, None)
+        macd_prev1 = ctx.prev("macd_hist_15m", 1, None)
+        macd_prev2 = ctx.prev("macd_hist_15m", 2, None)
         ema20 = ctx.ind("ema20_15m")
         ema60 = ctx.ind("ema60_15m")
         atr15 = ctx.ind("atr14_15m")
@@ -249,8 +311,8 @@ def _on_15m_close(ctx: StrategyContext) -> EntrySignal | ExitAction | None:
         rsi_curr = ctx.ind("rsi14_15m")
         rsi_prev = ctx.prev("rsi14_15m", 1, None)
         macd_curr = ctx.ind("macd_hist_15m")
-        macd_prev1 = ctx.prev("macd_hist_15m", 2, None)
-        macd_prev2 = ctx.prev("macd_hist_15m", 3, None)
+        macd_prev1 = ctx.prev("macd_hist_15m", 1, None)
+        macd_prev2 = ctx.prev("macd_hist_15m", 2, None)
         ema20 = ctx.ind("ema20_15m")
         ema60 = ctx.ind("ema60_15m")
         atr15 = ctx.ind("atr14_15m")

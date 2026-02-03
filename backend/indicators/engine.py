@@ -30,3 +30,18 @@ class IndicatorEngine:
                     out[sid] = {}
                 out[sid][res.name] = res
         return out
+
+    def preview(self, interval: str, bar: KlineBar) -> Dict[str, Dict[str, IndicatorResult]]:
+        """
+        Non-mutating preview for real-time (x=false) updates.
+        """
+        out: Dict[str, Dict[str, IndicatorResult]] = {}
+        for sid, spec_list in self._specs.items():
+            for spec in spec_list:
+                if spec.interval != interval:
+                    continue
+                res = spec.preview(bar)
+                if sid not in out:
+                    out[sid] = {}
+                out[sid][res.name] = res
+        return out

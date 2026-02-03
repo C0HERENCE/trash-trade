@@ -20,6 +20,7 @@ const basePath = (() => {
 })()
 
 const api = (p) => `${basePath}${p}`
+const viewMode = ref('dashboard') // 'dashboard' | 'detail'
 const currentStrategy = ref(null)
 const STRATEGY_STORAGE_KEY = 'trash_trade_selected_strategy'
 const status = ref({})
@@ -43,6 +44,7 @@ const tradesHasMore = ref(false)
 const ledgerHasMore = ref(false)
 const pageSize = 20
 const loading = ref(false)
+const dashboardItems = ref([])
 
 const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4)
 const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--'
@@ -50,6 +52,18 @@ const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--'
 const withStrategy = (url) => {
   if (!currentStrategy.value) return url
   return url + (url.includes('?') ? '&' : '?') + `strategy=${encodeURIComponent(currentStrategy.value)}`
+}
+
+const setUrl = (view, strategy) => {
+  const url = new URL(window.location.href)
+  if (view === 'detail' && strategy) {
+    url.searchParams.set('view', 'detail')
+    url.searchParams.set('strategy', strategy)
+  } else {
+    url.searchParams.delete('view')
+    url.searchParams.delete('strategy')
+  }
+  window.history.replaceState({}, '', url.toString())
 }
 
 const loadStrategies = async () => {
@@ -140,6 +154,25 @@ const loadStats = async () => {
     stats.value = data
   } catch (error) {
     console.error('Failed to load stats:', error)
+  }
+}
+
+// Dashboard data (lightweight per-strategy snapshot)
+const loadDashboard = async () => {
+  try {
+    await loadStrategies()
+    const condRes = await fetch(api('/api/conditions_summary'))
+    const condData = await condRes.json()
+    const condMap = {}
+    ;(condData.items || []).forEach(it => { condMap[it.strategy] = it.conditions || { long: [], short: [] } })
+    const statusList = await Promise.all((strategies.value || []).map(async (s) => {
+      const res = await fetch(api(`/api/status?strategy=${encodeURIComponent(s.id)}`))
+      const st = await res.json()
+      return { id: s.id, status: st, cond: condMap[s.id] || { long: [], short: [] } }
+    }))
+    dashboardItems.value = statusList
+  } catch (error) {
+    console.error('Failed to load dashboard:', error)
   }
 }
 
@@ -259,17 +292,46 @@ const initStatusWs = () => {
 
 const connectWs = () => {
   stopStreams()
+  if (!currentStrategy.value) return
   initWs()
   initStatusWs()
   startCountdown()
 }
 
+const enterDetail = async (sid) => {
+  currentStrategy.value = sid
+  viewMode.value = 'detail'
+  localStorage.setItem(STRATEGY_STORAGE_KEY, sid)
+  setUrl('detail', sid)
+  streamKline.value = null
+  streamIndicators.value = null
+  streamEvents.value = []
+  tradesPage.value = 0
+  ledgerPage.value = 0
+  loading.value = true
+  try {
+    await loadStatus()
+    await loadEquitySpark()
+    await loadTrades(0)
+    await loadLedger(0)
+    await loadStats()
+    connectWs()
+  } finally {
+    loading.value = false
+  }
+}
+
+const backToDashboard = async () => {
+  viewMode.value = 'dashboard'
+  setUrl('dashboard')
+  stopStreams()
+  await loadDashboard()
+}
+
 const handleStrategyChange = async (strategy) => {
   currentStrategy.value = strategy
   localStorage.setItem(STRATEGY_STORAGE_KEY, strategy)
-  const url = new URL(window.location.href)
-  url.searchParams.set('strategy', strategy)
-  window.history.replaceState({}, '', url.toString())
+  setUrl('detail', strategy)
   streamKline.value = null
   streamIndicators.value = null
   streamEvents.value = []
@@ -283,12 +345,57 @@ const handleStrategyChange = async (strategy) => {
     await loadLedger(0)
     await loadStats()
     stopStreams()
-    initWs()
-    initStatusWs()
-    startCountdown()
+    connectWs()
   } finally {
     loading.value = false
   }
+}
+
+// ---------- dashboard ----------
+const dashboardItems = ref([])
+
+const loadDashboard = async () => {
+  try {
+    await loadStrategies()
+    const condRes = await fetch(api('/api/conditions_summary'))
+    const condData = await condRes.json()
+    const condMap = {}
+    ;(condData.items || []).forEach(it => { condMap[it.strategy] = it.conditions || { long: [], short: [] } })
+    const statusList = await Promise.all((strategies.value || []).map(async (s) => {
+      const res = await fetch(api(`/api/status?strategy=${encodeURIComponent(s.id)}`))
+      const st = await res.json()
+      return { id: s.id, status: st, cond: condMap[s.id] || { long: [], short: [] } }
+    }))
+    dashboardItems.value = statusList
+  } catch (e) {
+    console.error('loadDashboard failed', e)
+  }
+}
+
+const enterDetail = async (sid) => {
+  currentStrategy.value = sid
+  localStorage.setItem(STRATEGY_STORAGE_KEY, sid)
+  const url = new URL(window.location.href)
+  url.searchParams.set('strategy', sid)
+  window.history.replaceState({}, '', url.toString())
+  viewMode.value = 'detail'
+  loading.value = true
+  try {
+    await loadStatus()
+    await loadEquitySpark()
+    await loadTrades(0)
+    await loadLedger(0)
+    await loadStats()
+    connectWs()
+  } finally {
+    loading.value = false
+  }
+}
+
+const backToDashboard = async () => {
+  viewMode.value = 'dashboard'
+  stopStreams()
+  await loadDashboard()
 }
 
 onMounted(async () => {
@@ -301,24 +408,16 @@ onMounted(async () => {
   }
   // 强制滚动到页面顶部，解决自动滚动到图表的问题
   forceTop()
-  
-  await loadStrategies()
-  if (currentStrategy.value) {
-    loading.value = true
-    try {
-      await loadStatus()
-      await loadEquitySpark()
-      await loadTrades(0)
-      await loadLedger(0)
-      await loadStats()
-      initWs()
-      initStatusWs()
-      startCountdown()
-    } finally {
-      loading.value = false
-    }
+
+  const params = new URLSearchParams(window.location.search)
+  const qsStrategy = params.get('strategy')
+  const qsView = params.get('view')
+
+  await loadDashboard()
+  if (qsView === 'detail' && qsStrategy) {
+    await enterDetail(qsStrategy)
   }
-  
+
   // 再次滚动到顶部，确保所有组件加载完成后页面仍在顶部
   await nextTick()
   forceTop()
@@ -354,14 +453,41 @@ const onLedgerRefresh = async () => {
       <div class="spinner"></div>
       <div class="loading-text">加载中…</div>
     </div>
-    <Header 
-      :strategies="strategies" 
-      :current-strategy="currentStrategy" 
-      :countdown="renderCountdown()"
-      @strategy-change="handleStrategyChange"
-      @connect-ws="connectWs"
-    />
-    <main>
+    <header class="topbar">
+      <div class="crumbs">
+        <span class="link" @click="backToDashboard">Dashboard</span>
+        <span v-if="viewMode==='detail'"> / {{ currentStrategy || '--' }}</span>
+      </div>
+      <div v-if="viewMode==='detail'">
+        <Header 
+          :strategies="strategies" 
+          :current-strategy="currentStrategy" 
+          :countdown="renderCountdown()"
+          @strategy-change="handleStrategyChange"
+          @connect-ws="connectWs"
+        />
+      </div>
+    </header>
+
+    <main v-if="viewMode==='dashboard'">
+      <div class="grid">
+        <div class="card" v-for="item in dashboardItems" :key="item.id">
+          <div class="row"><span>策略</span><span class="value">{{ item.id }}</span></div>
+          <div class="row"><span>余额</span><span class="value">{{ fmt(item.status?.balance) }}</span></div>
+          <div class="row"><span>权益</span><span class="value">{{ fmt(item.status?.equity) }}</span></div>
+          <div class="row"><span>UPL</span><span class="value">{{ fmt(item.status?.upl) }}</span></div>
+          <div class="row"><span>持仓</span><span class="value">
+            <template v-if="item.status?.position?.side">{{ item.status.position.side }} @ {{ fmt(item.status.position.entry_price) }} / {{ item.status.position.qty }}</template>
+            <template v-else>无</template>
+          </span></div>
+          <div class="row"><span>条件(多)</span><span class="value">{{ (item.cond?.long?.[0]?.desc) || '—' }}</span></div>
+          <div class="row"><span>条件(空)</span><span class="value">{{ (item.cond?.short?.[0]?.desc) || '—' }}</span></div>
+          <button class="btn" style="width:100%;margin-top:8px;" @click="enterDetail(item.id)">进入</button>
+        </div>
+      </div>
+    </main>
+
+    <main v-else>
       <div class="grid">
         <AssetCard :data="status" :equity-data="equityData" />
         <PositionCard :data="status" />

@@ -62,43 +62,29 @@ class MaCrossStrategy(IStrategy):
         }
 
     def describe_conditions(self, ctx: StrategyContext, ind_1h_ready: bool, has_position: bool, cooldown_bars: int) -> dict:
-        def item(label, ok, value=None, target=None, info=None):
-            return {"label": label, "ok": ok, "value": value, "target": target, "info": info}
+        def item(direction: str, tf: str, ok: bool, desc: str):
+            return {"direction": direction, "timeframe": tf, "ok": ok, "desc": desc, "label": f"[{tf}]{desc}"}
 
         if not ind_1h_ready:
-            return {"long": [item("1h指标未就绪", False)], "short": [item("1h指标未就绪", False)]}
+            return {"long": [item("LONG", "1h", False, "1h指标未就绪")], "short": [item("SHORT", "1h", False, "1h指标未就绪")]}
         if has_position:
-            return {"long": [item("已有持仓", False)], "short": [item("已有持仓", False)]}
+            return {"long": [item("LONG", "15m", False, "已有持仓")], "short": [item("SHORT", "15m", False, "已有持仓")]}
         if cooldown_bars > 0:
             label = f"冷却中({cooldown_bars})"
-            return {"long": [item(label, False)], "short": [item(label, False)]}
+            return {"long": [item("LONG", "15m", False, label)], "short": [item("SHORT", "15m", False, label)]}
 
         cond_long = []
         cond_short = []
         ema20 = ctx.ind("ema20_15m")
         ema60 = ctx.ind("ema60_15m")
-        prev_e20 = ctx.prev("ema20_15m", 1, ema20)
-        prev_e60 = ctx.prev("ema60_15m", 1, ema60)
-        cond_long.append(
-            item(
-                "15m EMA 多头",
-                (ema20 or 0) > (ema60 or 0),
-                info=f"ema20:{ema20:.2f} (prev:{(prev_e20 or 0):.2f}), ema60:{ema60:.2f} (prev:{(prev_e60 or 0):.2f}), 期望 ema20>ema60",
-            )
-        )
-        cond_short.append(
-            item(
-                "15m EMA 空头",
-                (ema20 or 0) < (ema60 or 0),
-                info=f"ema20:{ema20:.2f} (prev:{(prev_e20 or 0):.2f}), ema60:{ema60:.2f} (prev:{(prev_e60 or 0):.2f}), 期望 ema20<ema60",
-            )
-        )
+        cond_long.append(item("LONG", "15m", (ema20 or 0) > (ema60 or 0), "EMA多头"))
+        cond_short.append(item("SHORT", "15m", (ema20 or 0) < (ema60 or 0), "EMA空头"))
         rsi1h = ctx.ind("rsi14_1h")
         atr15 = ctx.ind("atr14_15m")
-        cond_long.append(item("1h RSI 多头", (rsi1h or 0) > 50, value=rsi1h, target=">50"))
-        cond_short.append(item("1h RSI 空头", (rsi1h or 0) < 50, value=rsi1h, target="<50"))
-        cond_long.append(item("ATR 止损可用", atr15 is not None, value=atr15))
-        cond_short.append(item("ATR 止损可用", atr15 is not None, value=atr15))
+        cond_long.append(item("LONG", "1h", (rsi1h or 0) > 50, "1h RSI>50"))
+        cond_short.append(item("SHORT", "1h", (rsi1h or 0) < 50, "1h RSI<50"))
+        cond_long.append(item("LONG", "15m", atr15 is not None, "ATR可用"))
+        cond_short.append(item("SHORT", "15m", atr15 is not None, "ATR可用"))
         return {"long": cond_long, "short": cond_short}
 
     def on_state_restore(self, ctx: StrategyContext) -> None:

@@ -23,3 +23,24 @@ body {
 #app {
   width: 100%;
 }
+
+.topbar {
+  padding: 12px 16px;
+  border-bottom: 1px solid #222634;
+  background: #0f1115;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.crumbs {
+  color: #9aa4b2;
+  font-size: 12px;
+}
+
+.link {
+  cursor: pointer;
+  color: #5cc8ff;
+}
+
+.link:hover { text-decoration: underline; }

@@ -6,31 +6,51 @@ const props = defineProps({
   }
 })
 
-const renderCondition = (condition) => {
-  if (!condition || !condition.length) {
-    return '<div class="check bad"><span class="dot"></span><span>暂无条件 / 等待下一根K线</span></div>'
-  }
-  return condition.map(c => {
-    const cls = c.ok ? 'ok' : 'bad'
-    const value = (c.value !== undefined && c.value !== null) ? ` | v=${Number(c.value).toFixed(4)}` : ''
-    const target = c.target ? ` | target=${c.target}` : ''
-    const slope = (c.slope !== undefined && c.slope !== null) ? ` | slope=${Number(c.slope).toFixed(4)}` : ''
-    const info = c.info ? ` | ${c.info}` : ''
-    return `<div class="check ${cls}"><span class="dot"></span><span>${c.label}${value}${target}${slope}${info}</span></div>`
-  }).join('')
-}
+const fmt = (v) => (typeof v === 'number' ? Number(v).toFixed(4) : (v ?? ''))
 </script>
 
 <template>
   <div class="card">
     <h2>入场条件</h2>
+
     <div class="row"><span>做多</span></div>
-    <div id="cond_long" class="checklist" v-html="renderCondition(conditions.long)"></div>
+    <div v-if="!conditions.long || !conditions.long.length" class="check bad">
+      <span class="dot"></span><span>暂无条件 / 等待下一根K线</span>
+    </div>
+    <template v-else>
+      <div
+        v-for="(c, idx) in conditions.long"
+        :key="'l'+idx"
+        class="check"
+        :class="c.ok ? 'ok' : 'bad'"
+      >
+        <span class="dot"></span>
+        <span>[{{ c.timeframe || '-' }}][{{ c.direction || 'LONG' }}] {{ c.desc || c.label || '条件' }}</span>
+        <span v-if="c.value !== undefined">｜v={{ fmt(c.value) }}</span>
+        <span v-if="c.target">｜target={{ c.target }}</span>
+      </div>
+    </template>
+
     <div class="row" style="margin-top:10px;"><span>做空</span></div>
-    <div id="cond_short" class="checklist" v-html="renderCondition(conditions.short)"></div>
+    <div v-if="!conditions.short || !conditions.short.length" class="check bad">
+      <span class="dot"></span><span>暂无条件 / 等待下一根K线</span>
+    </div>
+    <template v-else>
+      <div
+        v-for="(c, idx) in conditions.short"
+        :key="'s'+idx"
+        class="check"
+        :class="c.ok ? 'ok' : 'bad'"
+      >
+        <span class="dot"></span>
+        <span>[{{ c.timeframe || '-' }}][{{ c.direction || 'SHORT' }}] {{ c.desc || c.label || '条件' }}</span>
+        <span v-if="c.value !== undefined">｜v={{ fmt(c.value) }}</span>
+        <span v-if="c.target">｜target={{ c.target }}</span>
+      </div>
+    </template>
   </div>
 </template>
 
 <style scoped>
-/* 样式已在App.vue中全局定义 */
+/* 样式在全局定义 */
 </style>

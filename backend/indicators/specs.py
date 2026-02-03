@@ -39,6 +39,13 @@ class IIndicatorSpec(Protocol):
         """Update internal state with a closed bar and return the latest result."""
         ...
 
+    def preview(self, bar: KlineBar) -> IndicatorResult:
+        """
+        Compute next value without mutating internal state.
+        Default implementations provided by concrete specs.
+        """
+        ...
+
 
 # ---- concrete implementations (lightweight, to be wired in later steps) ----
 
@@ -70,6 +77,15 @@ class EmaSpec:
         if len(self._history) > self.history_size:
             self._history.pop(0)
         return IndicatorResult(self.name, self._ema, self._history.copy())
+
+    def preview(self, bar: KlineBar) -> IndicatorResult:
+        price = bar.close
+        if self._ema is None:
+            val = price
+        else:
+            k = 2 / (self.length + 1)
+            val = price * k + self._ema * (1 - k)
+        return IndicatorResult(self.name, val, self._history.copy())
 
 
 class RsiSpec:
@@ -112,6 +128,25 @@ class RsiSpec:
             self._history.append(rsi)
             if len(self._history) > self.history_size:
                 self._history.pop(0)
+        return IndicatorResult(self.name, rsi, self._history.copy())
+
+    def preview(self, bar: KlineBar) -> IndicatorResult:
+        close = bar.close
+        if self._last_close is None:
+            return IndicatorResult(self.name, None, self._history.copy())
+        change = close - self._last_close
+        gain = max(change, 0.0)
+        loss = max(-change, 0.0)
+        avg_gain = self._avg_gain
+        avg_loss = self._avg_loss
+        if avg_gain is None or avg_loss is None:
+            avg_gain = gain
+            avg_loss = loss
+        else:
+            avg_gain = (avg_gain * (self.length - 1) + gain) / self.length
+            avg_loss = (avg_loss * (self.length - 1) + loss) / self.length
+        rs = None if avg_loss == 0 else avg_gain / avg_loss if avg_loss else None
+        rsi = None if rs is None else 100 - 100 / (1 + rs)
         return IndicatorResult(self.name, rsi, self._history.copy())
 
 
@@ -162,6 +197,20 @@ class MacdSpec:
             extras={"macd": macd_line, "signal": self._signal},
         )
 
+    def preview(self, bar: KlineBar) -> IndicatorResult:
+        price = bar.close
+        ema_fast = self._ema(self._ema_fast, price, self.fast)
+        ema_slow = self._ema(self._ema_slow, price, self.slow)
+        macd_line = ema_fast - ema_slow if (ema_fast is not None and ema_slow is not None) else None
+        signal = self._ema(self._signal, macd_line, self.signal_len) if macd_line is not None else None
+        macd_hist = macd_line - signal if (macd_line is not None and signal is not None) else None
+        return IndicatorResult(
+            self.name,
+            macd_hist,
+            self._history.copy(),
+            extras={"macd": macd_line, "signal": signal},
+        )
+
 
 class AtrSpec:
     def __init__(self, name: str, interval: str, length: int) -> None:
@@ -193,3 +242,12 @@ class AtrSpec:
         self._last_close = close
         self._history = [self._atr]
         return IndicatorResult(self.name, self._atr, self._history.copy())
+
+    def preview(self, bar: KlineBar) -> IndicatorResult:
+        high, low, close = bar.high, bar.low, bar.close
+        if self._last_close is None:
+            tr = high - low
+        else:
+            tr = max(high - low, abs(high - self._last_close), abs(low - self._last_close))
+        atr = tr if self._atr is None else (self._atr * (self.length - 1) + tr) / self.length
+        return IndicatorResult(self.name, atr, self._history.copy())

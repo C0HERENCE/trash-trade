@@ -421,6 +421,15 @@ async def get_klines(
     return {"items": items}
 
 
+@app.get("/api/conditions_summary")
+async def conditions_summary() -> Dict[str, Any]:
+    snap = await stream_store.get_snapshot()
+    items = []
+    for sid, cond in (snap.conditions or {}).items():
+        items.append({"strategy": sid, "conditions": cond or {"long": [], "short": []}})
+    return {"items": items}
+
+
 def _deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
     for k, v in src.items():
         if isinstance(v, dict) and isinstance(dst.get(k), dict):

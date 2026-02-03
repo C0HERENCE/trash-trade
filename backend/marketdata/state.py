@@ -79,11 +79,12 @@ class MarketStateManager:
     async def prime_from_history(self, strategies: Dict[str, IStrategy], stream_store) -> Dict[str, Any]:
         """
         使用已有 K 线（buffers 已填充）预热指标与 per-strategy 状态。
-        返回用于 runtime 兼容的初始状态字典。
+        返回用于 runtime 兼容的初始状态字典：{"ctx_map": {sid: StrategyContext}, "last_ind_map": {...}}
         """
         if self.indicators is None or self.buffers is None:
             return {}
 
+        ctx_map: Dict[str, StrategyContext] = {}
         # 1h
         bars_1h = self.buffers.buffer("1h").to_list()
         if bars_1h:
@@ -110,10 +111,38 @@ class MarketStateManager:
             for bar in bars_15m:
                 last_bar_15m = bar
                 snaps = self.indicators.update_on_close("15m", bar)
-                # keep last map for stream push
-                if snaps:
-                    # take first strategy as representative for initial snapshot
-                    first_sid, res_map = next(iter(snaps.items()))
+                if not snaps:
+                    continue
+                # build ctx per strategy for last bar
+                for sid, res_map in snaps.items():
+                    if res_map is None:
+                        continue
+                    ind1 = self.ind_1h_map.get(sid) or {
+                        "ema20_1h": None,
+                        "ema60_1h": None,
+                        "rsi14_1h": None,
+                        "close_1h": bar.close,
+                    }
+                    indicators_map = {name: res.value for name, res in res_map.items() if res is not None}
+                    indicators_map.update(ind1)
+                    indicators_map["close_15m"] = bar.close
+                    history_map = {name: res.history for name, res in res_map.items() if res is not None and res.history}
+                    ctx_map[sid] = StrategyContext(
+                        timestamp=bar.close_time,
+                        interval="15m",
+                        price=bar.close,
+                        close_15m=bar.close,
+                        low_15m=bar.low,
+                        high_15m=bar.high,
+                        indicators=indicators_map,
+                        history=history_map,
+                        structure_stop=None,
+                        position=None,
+                        cooldown_bars_remaining=0,
+                    )
+                # keep last_ind_map (first strategy) for initial stream push
+                first_sid, res_map = next(iter(snaps.items()))
+                if res_map:
                     last_ind_map = {name: res.value for name, res in res_map.items() if res}
 
         # 推送初始快照
@@ -137,7 +166,7 @@ class MarketStateManager:
                 first = next(iter(self.ind_1h_map.values()))
                 await stream_store.update_snapshot(indicators_1h=first)
 
-        return {}
+        return {"ctx_map": ctx_map, "last_ind_map": last_ind_map}
 
     async def on_kline_update(self, interval: str, bar: KlineBar) -> Dict[str, Any]:
         """处理 x=false 实时更新，返回可推送给前端的 payload。"""
