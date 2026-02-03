@@ -24,6 +24,24 @@ const withStrategy = (url) => {
   if (!props.strategy) return url
   return url + (url.includes('?') ? '&' : '?') + `strategy=${encodeURIComponent(props.strategy)}`
 }
+const subVisible = ref({})
+const showSubPicker = ref(false)
+const storageKey = () => `sub_visibility_${props.strategy || 'default'}`
+const loadVisibility = () => {
+  try {
+    const raw = localStorage.getItem(storageKey())
+    if (raw) subVisible.value = JSON.parse(raw)
+  } catch {}
+}
+const saveVisibility = () => {
+  try { localStorage.setItem(storageKey(), JSON.stringify(subVisible.value)) } catch {}
+}
+const applyVisibility = () => {
+  subSeries.forEach(({ name, series }) => {
+    const visible = subVisible.value[name] !== false
+    series?.applyOptions({ visible })
+  })
+}
 
 const loadIndicatorHistory = async () => {
   try {
@@ -32,6 +50,7 @@ const loadIndicatorHistory = async () => {
     const hints = data.hints || {}
     const subs = hints.subchart || []
     const types = hints.types || {}
+    loadVisibility()
     subSeries = subs.map((name, idx) => ({
       name,
       series:
@@ -55,6 +74,7 @@ const loadIndicatorHistory = async () => {
       })
     })
     subSeries.forEach(s => s.series?.setData(s.data))
+    applyVisibility()
   } catch (error) {
     console.error('Failed to load indicator history:', error)
   }
@@ -114,6 +134,8 @@ watch(() => props.indicators, (i) => {
       name,
       series: chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 })
     }))
+    loadVisibility()
+    applyVisibility()
   }
   const t = Math.floor(props.kline.t / 1000)
   subSeries.forEach(({ name, series }) => {
@@ -127,15 +149,52 @@ watch(() => props.indicators, (i) => {
     }
   })
 })
+
+const toggleSub = (name) => {
+  const current = subVisible.value[name] !== false
+  subVisible.value = { ...subVisible.value, [name]: !current }
+  applyVisibility()
+  saveVisibility()
+}
 </script>
 
 <template>
   <div class="card">
-    <h2>副图：{{ subSeries.map(s => s.name).join(' / ') || '指标' }}</h2>
+    <div class="header-row">
+      <h2>副图：{{ subSeries.map(s => s.name).join(' / ') || '指标' }}</h2>
+      <button class="btn" @click="showSubPicker = !showSubPicker">选择</button>
+    </div>
+    <div v-if="showSubPicker" class="picker">
+      <label v-for="s in subSeries" :key="s.name">
+        <input type="checkbox" :checked="subVisible[s.name] !== false" @change="toggleSub(s.name)" />
+        {{ s.name }}
+      </label>
+    </div>
     <div ref="chartContainer" id="subchart" style="height: clamp(140px, 22vh, 220px); width: 100%;"></div>
   </div>
 </template>
 
 <style scoped>
 /* 样式已在App.vue中全局定义 */
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.btn {
+  padding: 4px 8px;
+  border: 1px solid #444;
+  background: #1e1e1e;
+  color: #eee;
+  cursor: pointer;
+}
+.btn:hover {
+  background: #2a2a2a;
+}
 </style>

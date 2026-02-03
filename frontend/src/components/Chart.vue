@@ -19,6 +19,8 @@ const eventKeys = new Set()
 let stopLine = null
 let tp1Line = null
 let tp2Line = null
+const showOverlayPicker = ref(false)
+const overlayVisible = ref({})
 
 const basePath = (() => {
   const path = window.location.pathname
@@ -31,6 +33,25 @@ const api = (p) => `${basePath}${p}`
 const withStrategy = (url) => {
   if (!props.strategy) return url
   return url + (url.includes('?') ? '&' : '?') + `strategy=${encodeURIComponent(props.strategy)}`
+}
+
+const storageKey = () => `overlay_visibility_${props.strategy || 'default'}`
+const loadVisibility = () => {
+  try {
+    const raw = localStorage.getItem(storageKey())
+    if (raw) overlayVisible.value = JSON.parse(raw)
+  } catch {}
+}
+const saveVisibility = () => {
+  try {
+    localStorage.setItem(storageKey(), JSON.stringify(overlayVisible.value))
+  } catch {}
+}
+const applyVisibility = () => {
+  overlaySeries.forEach(({ name, series }) => {
+    const visible = overlayVisible.value[name] !== false
+    series?.applyOptions({ visible })
+  })
 }
 
 const clearLines = () => {
@@ -90,6 +111,7 @@ const loadIndicatorHistory = async () => {
       }),
       data: [],
     }))
+    loadVisibility()
 
     items.forEach(i => {
       overlays.forEach((name, idx) => {
@@ -100,6 +122,7 @@ const loadIndicatorHistory = async () => {
       })
     })
     overlaySeries.forEach(s => s.series?.setData(s.data))
+    applyVisibility()
   } catch (error) {
     console.error('Failed to load indicator history:', error)
   }
@@ -172,6 +195,7 @@ watch(() => props.strategy, async () => {
   await loadHistory()
   await loadIndicatorHistory()
   updatePriceLines()
+  applyVisibility()
 })
 
 watch(() => props.kline, (k) => {
@@ -193,6 +217,8 @@ watch(() => props.indicators, (i) => {
       name,
       series: chart?.addLineSeries({ color: idx === 0 ? '#5cc8ff' : '#ffb86c', lineWidth: 1 })
     }))
+    loadVisibility()
+    applyVisibility()
   }
   const t = Math.floor(props.kline.t / 1000)
   overlaySeries.forEach(({ name, series }) => {
@@ -202,6 +228,13 @@ watch(() => props.indicators, (i) => {
     }
   })
 })
+
+const toggleOverlay = (name) => {
+  const current = overlayVisible.value[name] !== false
+  overlayVisible.value = { ...overlayVisible.value, [name]: !current }
+  applyVisibility()
+  saveVisibility()
+}
 
 watch(() => props.events, (evs) => {
   if (!evs || !evs.length) return
@@ -215,11 +248,41 @@ watch(() => props.position, () => {
 
 <template>
   <div class="card">
-    <h2>15m K 线 + {{ overlaySeries.map(s => s.name).join(' / ') || '指标' }}</h2>
+    <div class="header-row">
+      <h2>15m K 线 + {{ overlaySeries.map(s => s.name).join(' / ') || '指标' }}</h2>
+      <button class="btn" @click="showOverlayPicker = !showOverlayPicker">选择</button>
+    </div>
+    <div v-if="showOverlayPicker" class="picker">
+      <label v-for="s in overlaySeries" :key="s.name">
+        <input type="checkbox" :checked="overlayVisible[s.name] !== false" @change="() => { overlayVisible[s.name] = overlayVisible[s.name] === false ? true : false; applyVisibility(); saveVisibility(); }" />
+        {{ s.name }}
+      </label>
+    </div>
     <div ref="chartContainer" id="chart" style="height: clamp(220px, 30vh, 420px); width: 100%;"></div>
   </div>
 </template>
 
 <style scoped>
 /* 样式已在App.vue中全局定义 */
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.btn {
+  padding: 4px 8px;
+  border: 1px solid #444;
+  background: #1e1e1e;
+  color: #eee;
+  cursor: pointer;
+}
+.btn:hover {
+  background: #2a2a2a;
+}
 </style>
