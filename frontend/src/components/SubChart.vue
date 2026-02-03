@@ -46,7 +46,11 @@ const loadIndicatorHistory = async () => {
       subs.forEach((name, idx) => {
         const v = i[name]
         if (v !== null && v !== undefined) {
-          subSeries[idx].data.push({ time: i.time, value: v })
+          if (types[name] === 'histogram') {
+            subSeries[idx].data.push({ time: i.time, value: v, color: v >= 0 ? '#7ee787' : '#ff6b6b' })
+          } else {
+            subSeries[idx].data.push({ time: i.time, value: v })
+          }
         }
       })
     })
@@ -115,7 +119,11 @@ watch(() => props.indicators, (i) => {
   subSeries.forEach(({ name, series }) => {
     const v = i[name]
     if (v !== undefined && v !== null) {
-      series?.update({ time: t, value: v })
+      if (types[name] === 'histogram') {
+        series?.update({ time: t, value: v, color: v >= 0 ? '#7ee787' : '#ff6b6b' })
+      } else {
+        series?.update({ time: t, value: v })
+      }
     }
   })
 })
