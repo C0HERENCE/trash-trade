@@ -10,8 +10,7 @@ const props = defineProps({
 
 const chartContainer = ref(null)
 let chart = null
-let macdSeries = null
-let rsiSeries = null
+let subSeries = []
 
 const basePath = (() => {
   const path = window.location.pathname
@@ -38,23 +37,24 @@ const loadIndicatorHistory = async () => {
   try {
     const res = await fetch(withStrategy(api('/api/indicator_history?interval=15m&limit=500')))
     const data = await res.json()
+    const hints = data.hints || {}
+    const subs = hints.subchart || []
+    subSeries = subs.map((name, idx) => ({
+      name,
+      series: chart?.addLineSeries({ color: idx === 0 ? '#7ee787' : '#ff6b6b', lineWidth: 1 }),
+      data: [],
+    }))
+
     const items = data.items || []
-    const macd = []
-    const rsi = []
-    
     items.forEach(i => {
-      const m = pick(i, ['macd_hist_15m', 'macd_hist', 'macd'])
-      const r = pick(i, ['rsi14_15m', 'rsi14', 'rsi'])
-      if (m !== null && m !== undefined) {
-        macd.push({ time: i.time, value: m, color: m >= 0 ? '#7ee787' : '#ff6b6b' })
-      }
-      if (r !== null && r !== undefined) {
-        rsi.push({ time: i.time, value: r })
-      }
+      subs.forEach((name, idx) => {
+        const v = i[name]
+        if (v !== null && v !== undefined) {
+          subSeries[idx].data.push({ time: i.time, value: v })
+        }
+      })
     })
-    
-    macdSeries.setData(macd)
-    rsiSeries.setData(rsi)
+    subSeries.forEach(s => s.series?.setData(s.data))
   } catch (error) {
     console.error('Failed to load indicator history:', error)
   }
@@ -71,8 +71,8 @@ const resizeChart = () => {
 }
 
 const resetData = () => {
-  if (macdSeries) macdSeries.setData([])
-  if (rsiSeries) rsiSeries.setData([])
+  subSeries.forEach(s => s.series?.setData([]))
+  subSeries = []
 }
 
 onMounted(() => {
@@ -84,8 +84,6 @@ onMounted(() => {
         rightPriceScale: { borderColor: '#242a3a' },
         timeScale: { borderColor: '#242a3a' },
       })
-      macdSeries = chart.addHistogramSeries({ color: '#7ee787' })
-      rsiSeries = chart.addLineSeries({ color: '#ff6b6b', lineWidth: 1 })
       loadIndicatorHistory()
       window.addEventListener('resize', resizeChart)
       resizeChart()
@@ -109,12 +107,12 @@ watch(() => props.strategy, async () => {
 })
 
 watch(() => props.indicators, (i) => {
-  if (!i || !props.kline) return
+  if (!i || !props.kline || !subSeries.length) return
   const t = Math.floor(props.kline.t / 1000)
-  const m = pick(i, ['macd_hist_15m', 'macd_hist', 'macd'])
-  const r = pick(i, ['rsi14_15m', 'rsi14', 'rsi'])
-  if (m !== undefined && m !== null) macdSeries?.update({ time: t, value: m, color: m >= 0 ? '#7ee787' : '#ff6b6b' })
-  if (r !== undefined && r !== null) rsiSeries?.update({ time: t, value: r })
+  subSeries.forEach(({ name, series }) => {
+    const v = i[name]
+    if (v !== undefined && v !== null) series?.update({ time: t, value: v })
+  })
 })
 </script>
 

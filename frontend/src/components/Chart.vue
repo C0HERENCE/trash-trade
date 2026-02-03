@@ -13,8 +13,7 @@ const props = defineProps({
 const chartContainer = ref(null)
 let chart = null
 let candleSeries = null
-let ema20Series = null
-let ema60Series = null
+let overlaySeries = []
 let markers = []
 const eventKeys = new Set()
 let stopLine = null
@@ -88,22 +87,27 @@ const loadIndicatorHistory = async () => {
     const res = await fetch(withStrategy(api('/api/indicator_history?interval=15m&limit=500')))
     const data = await res.json()
     const items = data.items || []
-    const ema20 = []
-    const ema60 = []
-    
+    const overlays = (data.hints && data.hints.price_overlays) || []
+
+    // create series for each overlay field
+    overlaySeries = overlays.map((name, idx) => ({
+      name,
+      series: chart?.addLineSeries({
+        color: idx === 0 ? '#5cc8ff' : '#ffb86c',
+        lineWidth: 1,
+      }),
+      data: [],
+    }))
+
     items.forEach(i => {
-      const e20 = pick(i, ['ema20_15m', 'ema20', 'ema_fast'])
-      const e60 = pick(i, ['ema60_15m', 'ema60', 'ema_slow'])
-      if (e20 !== null && e20 !== undefined) {
-        ema20.push({ time: i.time, value: e20 })
-      }
-      if (e60 !== null && e60 !== undefined) {
-        ema60.push({ time: i.time, value: e60 })
-      }
+      overlays.forEach((name, idx) => {
+        const v = i[name]
+        if (v !== null && v !== undefined) {
+          overlaySeries[idx].data.push({ time: i.time, value: v })
+        }
+      })
     })
-    
-    ema20Series.setData(ema20)
-    ema60Series.setData(ema60)
+    overlaySeries.forEach(s => s.series?.setData(s.data))
   } catch (error) {
     console.error('Failed to load indicator history:', error)
   }
@@ -138,8 +142,8 @@ const resetChartData = () => {
     candleSeries.setMarkers([])
     candleSeries.setData([])
   }
-  if (ema20Series) ema20Series.setData([])
-  if (ema60Series) ema60Series.setData([])
+  overlaySeries.forEach(s => s.series?.setData([]))
+  overlaySeries = []
   clearLines()
 }
 
@@ -153,8 +157,6 @@ onMounted(() => {
         timeScale: { borderColor: '#242a3a' },
       })
       candleSeries = chart.addCandlestickSeries()
-      ema20Series = chart.addLineSeries({ color: '#5cc8ff', lineWidth: 1 })
-      ema60Series = chart.addLineSeries({ color: '#ffb86c', lineWidth: 1 })
       loadHistory()
       loadIndicatorHistory()
       window.addEventListener('resize', resizeChart)
@@ -192,12 +194,12 @@ watch(() => props.kline, (k) => {
 })
 
 watch(() => props.indicators, (i) => {
-  if (!i || !props.kline || !ema20Series || !ema60Series) return
+  if (!i || !props.kline || !overlaySeries.length) return
   const t = Math.floor(props.kline.t / 1000)
-  const e20 = pick(i, ['ema20_15m', 'ema20', 'ema_fast'])
-  const e60 = pick(i, ['ema60_15m', 'ema60', 'ema_slow'])
-  if (e20 !== undefined && e20 !== null) ema20Series.update({ time: t, value: e20 })
-  if (e60 !== undefined && e60 !== null) ema60Series.update({ time: t, value: e60 })
+  overlaySeries.forEach(({ name, series }) => {
+    const v = i[name]
+    if (v !== undefined && v !== null) series?.update({ time: t, value: v })
+  })
 })
 
 watch(() => props.events, (evs) => {
