@@ -42,13 +42,13 @@ class StrategyContext:
     # indicators
     ind_15m: Indicators15m
     ind_1h: Indicators1h
-    prev_ema20_15m: Optional[float] = None
-    prev_ema60_15m: Optional[float] = None
 
     # history for cross/sequence checks
-    prev_rsi_15m: float
-    prev_macd_hist_15m: float
-    prev2_macd_hist_15m: float
+    prev_rsi_15m: Optional[float] = None
+    prev_macd_hist_15m: Optional[float] = None
+    prev2_macd_hist_15m: Optional[float] = None
+    prev_ema20_15m: Optional[float] = None
+    prev_ema60_15m: Optional[float] = None
 
     # volatility / structure
     atr14: float
