@@ -129,7 +129,7 @@ class IStrategy(Protocol):
     def on_bar_close(self, ctx: StrategyContext) -> Optional[EntrySignal | ExitAction]:
         ...
 
-    def on_tick(self, ctx: StrategyContext, price: float) -> Optional[ExitAction]:
+    def on_tick(self, ctx: StrategyContext, price: float) -> Optional[EntrySignal | ExitAction]:
         ...
 
     def on_state_restore(self, ctx: StrategyContext) -> None:

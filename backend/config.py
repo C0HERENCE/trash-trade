@@ -76,6 +76,8 @@ class StrategyConfig(BaseModel):
     rsi_short_upper: float = 50.0
     rsi_short_lower: float = 40.0
     rsi_slope_required: bool = True
+    realtime_entry: bool = False
+    realtime_exit: bool = False
 
 
 class StrategyEntryConfig(BaseModel):

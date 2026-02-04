@@ -23,6 +23,9 @@ strategies:
   - id: dual_ma_test
     type: ma_cross
     config_path: "./configs/strategies/dual_ma_test.ma_cross.yaml"
+  - id: simple_rsi_overtrade_strategy
+    type: simple_rsi_overtrade_strategy
+    config_path: "./configs/strategies/simple_rsi_overtrade_strategy.yaml"
 
 alerts:
   enabled: true

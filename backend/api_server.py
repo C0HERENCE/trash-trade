@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Deque, Dict, List, Optional
 import yaml
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +20,8 @@ from .config import load_settings
 from .db import Database
 from .indicators.engine import IndicatorEngine
 from .marketdata.buffer import KlineBar
-from .strategy import TestStrategy, MaCrossStrategy
+from .strategy.profile_loader import build_strategy_profile
+from .strategy.registry import create_strategy
 import msgpack
 
 
@@ -136,6 +137,19 @@ class StreamStore:
                 return []
             return list(self._events)[-limit:]
 
+    async def reset_strategy(self, strategy_id: str) -> None:
+        async with self._lock:
+            if self._snapshot.last_signal and self._snapshot.last_signal.get("sid") == strategy_id:
+                self._snapshot.last_signal = None
+            if self._snapshot.conditions and strategy_id in self._snapshot.conditions:
+                del self._snapshot.conditions[strategy_id]
+            if self._events:
+                self._events = deque(
+                    [e for e in self._events if e.get("sid") != strategy_id],
+                    maxlen=self._events.maxlen,
+                )
+            self._snapshot.ts = int(time.time() * 1000)
+
 
 settings = load_settings()
 app = FastAPI(title="trash-trade", root_path=settings.api.base_path or "")
@@ -173,15 +187,18 @@ def _strategy_initial_capital(strategy_id: str) -> float:
 # Hooks injected from main/runtime
 runtime_state_provider = None  # callable returning dict
 runtime_alert_sender = None    # callable (level, title, message)
+runtime_reset = None           # async callable (strategy_id)
 ws_status_clients = 0
 ws_stream_clients = 0
 
-def set_runtime_hooks(state_cb=None, alert_cb=None):
-    global runtime_state_provider, runtime_alert_sender
+def set_runtime_hooks(state_cb=None, alert_cb=None, reset_cb=None):
+    global runtime_state_provider, runtime_alert_sender, runtime_reset
     if state_cb:
         runtime_state_provider = state_cb
     if alert_cb:
         runtime_alert_sender = alert_cb
+    if reset_cb:
+        runtime_reset = reset_cb
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.api.cors_allow_origins,
@@ -378,6 +395,24 @@ async def get_ledger(
     return {"items": [dict(r) for r in rows]}
 
 
+@app.post("/api/db/reset")
+async def reset_db(
+    strategy: Optional[str] = Query(None),
+    runtime: bool = Query(True),
+) -> Dict[str, Any]:
+    sid = strategy or DEFAULT_STRATEGY
+    if sid not in _strategy_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown strategy: {sid}")
+    db = await _db()
+    counts = await db.reset_strategy_data(sid)
+    await db.close()
+    runtime_cleared = False
+    if runtime and runtime_reset is not None:
+        await runtime_reset(sid)
+        runtime_cleared = True
+    return {"strategy": sid, "deleted": counts, "runtime_cleared": runtime_cleared}
+
+
 @app.get("/api/stats")
 async def get_stats(strategy: Optional[str] = Query(None)) -> Dict[str, Any]:
     sid = strategy or DEFAULT_STRATEGY
@@ -430,83 +465,6 @@ async def conditions_summary() -> Dict[str, Any]:
     return {"items": items}
 
 
-def _deep_update(dst: Dict[str, Any], src: Dict[str, Any]) -> Dict[str, Any]:
-    for k, v in src.items():
-        if isinstance(v, dict) and isinstance(dst.get(k), dict):
-            _deep_update(dst[k], v)
-        else:
-            dst[k] = v
-    return dst
-
-
-def _build_profile(entry) -> Dict[str, Any]:
-    base_sim = {
-        "initial_capital": settings.sim.initial_capital,
-        "max_leverage": settings.sim.max_leverage,
-        "fee_rate": settings.sim.fee_rate,
-        "slippage": settings.sim.slippage,
-    }
-    base_risk = {
-        "max_position_notional": settings.risk.max_position_notional,
-        "max_position_pct_equity": settings.risk.max_position_pct_equity,
-        "mmr_tiers": settings.risk.mmr_tiers,
-    }
-    default_kcache = {
-        "max_bars_15m": 2000,
-        "max_bars_1h": 2000,
-        "warmup_buffer_mult": 3.0,
-        "warmup_extra_bars": 200,
-    }
-    if entry.type == "ma_cross":
-        strategy_defaults = {"atr_stop_mult": 1.2, "cooldown_after_stop": 2}
-        indicator_defaults = {
-            "ema_fast": {"length": 20},
-            "ema_slow": {"length": 60},
-            "ema_trend": {"fast": 20, "slow": 60},
-            "rsi": {"length": 14},
-            "atr": {"length": 14},
-        }
-    else:
-        strategy_defaults = {
-            "trend_strength_min": 0.003,
-            "atr_stop_mult": 1.5,
-            "cooldown_after_stop": 4,
-            "rsi_long_lower": 50.0,
-            "rsi_long_upper": 60.0,
-            "rsi_short_upper": 50.0,
-            "rsi_short_lower": 40.0,
-            "rsi_slope_required": True,
-        }
-        indicator_defaults = {
-            "rsi": {"length": 14},
-            "ema_fast": {"length": 12},
-            "ema_slow": {"length": 26},
-            "macd": {"fast": 12, "slow": 26, "signal": 9},
-            "atr": {"length": 14},
-            "ema_trend": {"fast": 20, "slow": 60},
-        }
-    profile = {
-        "sim": base_sim,
-        "risk": base_risk,
-        "strategy": strategy_defaults,
-        "indicators": indicator_defaults,
-        "kline_cache": default_kcache,
-    }
-    if entry.config_path:
-        p = Path(entry.config_path)
-        if not p.is_absolute():
-            p = (Path.cwd() / p).resolve()
-        if p.exists():
-            loaded = yaml.safe_load(p.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict):
-                _deep_update(profile, loaded)
-    if isinstance(entry.params, dict) and entry.params:
-        _deep_update(profile, entry.params)
-    if entry.initial_capital is not None:
-        profile["sim"]["initial_capital"] = entry.initial_capital
-    return profile
-
-
 @app.get("/api/indicator_history")
 async def get_indicator_history(
     interval: str = Query("15m"),
@@ -525,8 +483,8 @@ async def get_indicator_history(
 
     sid = strategy or DEFAULT_STRATEGY
     entry = next((s for s in settings.strategies if s.id == sid), settings.strategies[0])
-    profile = _build_profile(entry)
-    strat = MaCrossStrategy() if entry.type == "ma_cross" else TestStrategy()
+    profile = build_strategy_profile(settings, entry)
+    strat = create_strategy(entry.type)
     strat.id = entry.id
     strat.configure(profile)
     specs = strat.indicator_requirements()

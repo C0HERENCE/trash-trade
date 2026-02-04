@@ -412,3 +412,28 @@ class Database:
         if row:
             return float(row["equity"])
         return None
+
+    async def reset_strategy_data(self, strategy: str) -> Dict[str, int]:
+        await self.connect()
+        counts: Dict[str, int] = {}
+        tables = ["trades", "positions", "equity_snapshots", "ledger", "alerts"]
+        for table in tables:
+            row = await self.fetchone(
+                f"SELECT COUNT(*) AS c FROM {table} WHERE strategy=?",
+                (strategy,),
+            )
+            counts[table] = int(row["c"]) if row else 0
+
+        await self._conn.execute("BEGIN")
+        try:
+            await self._conn.execute("DELETE FROM trades WHERE strategy=?", (strategy,))
+            await self._conn.execute("DELETE FROM positions WHERE strategy=?", (strategy,))
+            await self._conn.execute("DELETE FROM equity_snapshots WHERE strategy=?", (strategy,))
+            await self._conn.execute("DELETE FROM ledger WHERE strategy=?", (strategy,))
+            await self._conn.execute("DELETE FROM alerts WHERE strategy=?", (strategy,))
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            raise
+
+        return counts

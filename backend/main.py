@@ -21,7 +21,7 @@ _engine_task = None
 @app.on_event("startup")
 async def _startup() -> None:
     global _engine_task
-    set_runtime_hooks(state_cb=engine.runtime_state, alert_cb=engine.send_alert)
+    set_runtime_hooks(state_cb=engine.runtime_state, alert_cb=engine.send_alert, reset_cb=engine.reset_strategy)
     _engine_task = asyncio.create_task(engine.start())
 
 
