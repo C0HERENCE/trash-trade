@@ -45,6 +45,14 @@ const ledgerHasMore = ref(false)
 const pageSize = 20
 const loading = ref(false)
 const dashboardItems = ref([])
+const resetOpen = ref(false)
+const resetCountdown = ref(0)
+const resetTimer = ref(null)
+const resetInProgress = ref(false)
+const resetError = ref('')
+const resetMsg = ref('')
+let resetMsgTimer = null
+const RESET_WAIT_SEC = 8
 
 const fmt = (v) => (v === null || v === undefined) ? '--' : Number(v).toFixed(4)
 const fmtTs = (ms) => ms ? new Date(ms).toLocaleString() : '--'
@@ -219,6 +227,85 @@ const stopStreams = () => {
   }
 }
 
+const showResetMsg = (msg) => {
+  resetMsg.value = msg || ''
+  if (resetMsgTimer) clearTimeout(resetMsgTimer)
+  if (msg) {
+    resetMsgTimer = setTimeout(() => {
+      resetMsg.value = ''
+      resetMsgTimer = null
+    }, 3000)
+  }
+}
+
+const startResetCountdown = () => {
+  resetCountdown.value = RESET_WAIT_SEC
+  if (resetTimer.value) clearInterval(resetTimer.value)
+  resetTimer.value = setInterval(() => {
+    resetCountdown.value -= 1
+    if (resetCountdown.value <= 0) {
+      resetCountdown.value = 0
+      clearInterval(resetTimer.value)
+      resetTimer.value = null
+    }
+  }, 1000)
+}
+
+const openResetModal = () => {
+  resetError.value = ''
+  resetOpen.value = true
+  startResetCountdown()
+}
+
+const closeResetModal = () => {
+  resetOpen.value = false
+  if (resetTimer.value) {
+    clearInterval(resetTimer.value)
+    resetTimer.value = null
+  }
+}
+
+const clearLocalState = () => {
+  status.value = {}
+  equityData.value = []
+  trades.value = []
+  ledger.value = []
+  stats.value = {}
+  conditions.value = { long: [], short: [] }
+  streamKline.value = null
+  streamIndicators.value = null
+  streamEvents.value = []
+}
+
+const confirmReset = async () => {
+  if (!currentStrategy.value || resetCountdown.value > 0 || resetInProgress.value) return
+  resetInProgress.value = true
+  resetError.value = ''
+  try {
+    const res = await fetch(api(`/api/db/reset?strategy=${encodeURIComponent(currentStrategy.value)}`), {
+      method: 'POST'
+    })
+    if (!res.ok) {
+      const text = await res.text()
+      throw new Error(text || `reset failed: ${res.status}`)
+    }
+    await res.json()
+    clearLocalState()
+    await loadStatus()
+    await loadEquitySpark()
+    await loadTrades(0)
+    await loadLedger(0)
+    await loadStats()
+    connectWs()
+    showResetMsg(`已清空 ${currentStrategy.value}`)
+    closeResetModal()
+  } catch (error) {
+    resetError.value = error?.message || '清空失败'
+  } finally {
+    resetInProgress.value = false
+  }
+}
+
 const startCountdown = () => {
   remainingSec.value = 600
   if (countdownTimer.value) clearInterval(countdownTimer.value)
@@ -379,6 +466,14 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopStreams()
+  if (resetTimer.value) {
+    clearInterval(resetTimer.value)
+    resetTimer.value = null
+  }
+  if (resetMsgTimer) {
+    clearTimeout(resetMsgTimer)
+    resetMsgTimer = null
+  }
 })
 
 const onTradesPageChange = async (page) => {
@@ -416,11 +511,34 @@ const onLedgerRefresh = async () => {
           :strategies="strategies" 
           :current-strategy="currentStrategy" 
           :countdown="renderCountdown()"
+          :reset-msg="resetMsg"
           @strategy-change="handleStrategyChange"
           @connect-ws="connectWs"
+          @reset-request="openResetModal"
         />
       </div>
     </header>
+
+    <div v-if="resetOpen" class="modal-mask">
+      <div class="modal">
+        <div class="modal-title">二次确认：清空策略历史</div>
+        <div class="modal-warning">
+          你将清空 <strong>{{ currentStrategy || '--' }}</strong> 的所有历史执行记录，
+          同时重置运行时状态。此操作不可恢复。
+        </div>
+        <div class="modal-countdown">
+          <span v-if="resetCountdown > 0">倒计时 {{ resetCountdown }}s 后可确认</span>
+          <span v-else>已允许确认</span>
+        </div>
+        <div v-if="resetError" class="modal-error">{{ resetError }}</div>
+        <div class="modal-actions">
+          <button class="btn" @click="closeResetModal" :disabled="resetInProgress">取消</button>
+          <button class="btn danger" @click="confirmReset" :disabled="resetCountdown > 0 || resetInProgress">
+            {{ resetInProgress ? '清空中…' : '确认清空' }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <main v-if="viewMode==='dashboard'">
       <div class="grid">
@@ -631,6 +749,16 @@ main > * {
   cursor: not-allowed;
 }
 
+.btn.danger {
+  border-color: #4a2a2a;
+  color: #ffd2d2;
+  background: rgba(255, 107, 107, 0.12);
+}
+
+.btn.danger:hover {
+  border-color: #6a2f2f;
+}
+
 .select {
   background: #232838;
   color: var(--text);
@@ -669,6 +797,10 @@ main > * {
 .loading-text {
   color: var(--muted);
   font-size: 13px;
+}
+
+.muted {
+  color: var(--muted);
 }
 
 @keyframes spin {
@@ -718,4 +850,55 @@ th { color: var(--muted); font-weight: 500; }
 
 .ok .dot { background: var(--ok); }
 .bad .dot { background: var(--danger); }
+
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(9, 10, 14, 0.7);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  width: min(520px, calc(100% - 32px));
+  background: var(--panel);
+  border: 1px solid #2a3041;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 18px 30px rgba(0,0,0,0.45);
+}
+
+.modal-title {
+  font-size: 14px;
+  letter-spacing: 0.6px;
+  margin-bottom: 10px;
+}
+
+.modal-warning {
+  font-size: 13px;
+  color: var(--danger);
+  line-height: 1.5;
+}
+
+.modal-countdown {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.modal-actions {
+  margin-top: 16px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.modal-error {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--danger);
+}
 </style>

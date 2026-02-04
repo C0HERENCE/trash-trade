@@ -115,30 +115,6 @@ class StrategyRunner:
                     position=None,
                     cooldown_bars_remaining=0,
                 )
-            ctx.position = self._position_service.get_position(sid)
-            ctx.cooldown_bars_remaining = self._position_service.get_cooldown(sid)
-            ctx.meta["params"] = self._profiles[sid].get("strategy", {})
-            realtime_entry = bool(ctx.meta.get("params", {}).get("realtime_entry", False))
-            realtime_exit = bool(ctx.meta.get("params", {}).get("realtime_exit", False))
-            if realtime_entry and ctx.position is None:
-                try:
-                    action = strat.on_tick(ctx, bar.close)
-                except Exception:
-                    self._logger.exception("on_tick failed (prime) for %s", sid)
-                    action = None
-                if isinstance(action, EntrySignal):
-                    await self._position_service.open_position(sid, action)
-            elif realtime_exit and ctx.position is not None:
-                try:
-                    action = strat.on_tick(ctx, bar.close)
-                except Exception:
-                    self._logger.exception("on_tick failed (prime) for %s", sid)
-                    action = None
-                if isinstance(action, ExitAction):
-                    await self._position_service.close_by_action(sid, action)
-            ctx.position = self._position_service.get_position(sid)
-            ctx.cooldown_bars_remaining = self._position_service.get_cooldown(sid)
-                # fallthrough to condition calculation
             else:
                 ctx = replace(
                     base_ctx,

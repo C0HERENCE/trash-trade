@@ -13,10 +13,14 @@ const props = defineProps({
   countdown: {
     type: String,
     default: '--:--'
+  },
+  resetMsg: {
+    type: String,
+    default: ''
   }
 })
 
-const emit = defineEmits(['strategy-change', 'connect-ws'])
+const emit = defineEmits(['strategy-change', 'connect-ws', 'reset-request'])
 const shareMsg = ref('')
 
 const handleStrategyChange = (event) => {
@@ -25,6 +29,10 @@ const handleStrategyChange = (event) => {
 
 const handleConnectWs = () => {
   emit('connect-ws')
+}
+
+const handleReset = () => {
+  emit('reset-request')
 }
 
 const setShareStatus = (msg) => {
@@ -71,10 +79,9 @@ const handleShare = async () => {
 </script>
 
 <template>
-  <header>
-    <h1>Trash-Trade / BTCUSDT</h1>
-    <div class="row">
-      <label for="strategy_select" style="color:var(--muted);margin-right:6px;">策略</label>
+  <div class="header-controls">
+    <div class="control-group">
+      <label for="strategy_select" class="muted">策略</label>
       <select 
         id="strategy_select" 
         class="select"
@@ -85,14 +92,39 @@ const handleShare = async () => {
           {{ strategy.id }} ({{ strategy.type }})
         </option>
       </select>
-      <button class="btn" id="share_link" style="margin-left:6px;" @click="handleShare">分享</button>
-      <span id="share_status" style="margin-left:6px;color:var(--muted);font-size:12px;">{{ shareMsg }}</span>
-      <span class="value">{{ countdown }}</span>
-      <button class="btn" id="ws_connect" style="margin-left:10px;" @click="handleConnectWs">连接</button>
+      <button class="btn" id="share_link" @click="handleShare">分享</button>
+      <span id="share_status" class="muted small">{{ shareMsg }}</span>
     </div>
-  </header>
+    <div class="control-group">
+      <span class="countdown">{{ countdown }}</span>
+      <button class="btn" id="ws_connect" @click="handleConnectWs">连接</button>
+      <button class="btn danger" id="reset_db" @click="handleReset">清空记录</button>
+      <span v-if="resetMsg" class="muted small">{{ resetMsg }}</span>
+    </div>
+  </div>
 </template>
 
 <style scoped>
-/* 样式已在App.vue中全局定义 */
+.header-controls {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.small {
+  font-size: 12px;
+}
+
+.countdown {
+  font-size: 12px;
+  color: var(--muted);
+}
 </style>
