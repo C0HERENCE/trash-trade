@@ -116,7 +116,11 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('resize', resizeChart)
   if (chart) {
-    chart.destroy()
+    if (typeof chart.remove === 'function') {
+      chart.remove()
+    } else if (typeof chart.destroy === 'function') {
+      chart.destroy()
+    }
     chart = null
   }
 })
