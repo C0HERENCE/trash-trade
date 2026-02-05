@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { createChart } from 'lightweight-charts'
+import { getBasePath } from '../utils/basePath'
 
 const props = defineProps({
   strategy: { type: String, default: null },
@@ -22,12 +23,7 @@ let tp2Line = null
 const showOverlayPicker = ref(false)
 const overlayVisible = ref({})
 
-const basePath = (() => {
-  const path = window.location.pathname
-  if (path.endsWith('/')) return path.slice(0, -1)
-  const idx = path.lastIndexOf('/')
-  return idx >= 0 ? path.slice(0, idx) : ''
-})()
+const basePath = getBasePath()
 
 const api = (p) => `${basePath}${p}`
 const withStrategy = (url) => {
