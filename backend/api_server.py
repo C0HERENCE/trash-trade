@@ -673,5 +673,15 @@ async def ws_stream(websocket: WebSocket) -> None:
         ws_stream_clients = max(0, ws_stream_clients - 1)
 
 
+class SpaStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        if path == "api" or path.startswith("api/") or path == "ws" or path.startswith("ws/"):
+            return await super().get_response(path, scope)
+        response = await super().get_response(path, scope)
+        if response.status_code == 404:
+            return await super().get_response("index.html", scope)
+        return response
+
+
 # 挂载前端静态文件（在所有API路由定义之后）
-app.mount("/", StaticFiles(directory="frontend/dist", html=True), name="static")
+app.mount("/", SpaStaticFiles(directory="frontend/dist", html=True), name="static")
