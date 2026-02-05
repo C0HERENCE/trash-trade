@@ -1,6 +1,9 @@
 # 第一阶段：构建前端
 FROM node:20-alpine AS frontend-builder
 
+ARG VITE_BASE=/
+ENV VITE_BASE=${VITE_BASE}
+
 WORKDIR /app
 
 COPY frontend/package*.json ./frontend/
