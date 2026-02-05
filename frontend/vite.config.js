@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 
 // https://vite.dev/config/
+const base = process.env.VITE_BASE || '/'
+
 export default defineConfig({
   plugins: [vue()],
   build: {
@@ -9,7 +11,7 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false
   },
-  base: '/',
+  base,
   server: {
     proxy: {
       '/api': {
