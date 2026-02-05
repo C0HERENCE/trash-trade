@@ -15,6 +15,7 @@ from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, HTTPExceptio
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .config import load_settings
 from .db import Database
@@ -675,9 +676,17 @@ async def ws_stream(websocket: WebSocket) -> None:
 
 class SpaStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):
-        if path == "api" or path.startswith("api/") or path == "ws" or path.startswith("ws/"):
-            return await super().get_response(path, scope)
-        response = await super().get_response(path, scope)
+        clean = path.lstrip("/")
+        if clean == "api" or clean.startswith("api/") or clean == "ws" or clean.startswith("ws/"):
+            return await super().get_response(clean, scope)
+        if Path(clean).suffix:
+            return await super().get_response(clean, scope)
+        try:
+            response = await super().get_response(clean, scope)
+        except StarletteHTTPException as exc:
+            if exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
         if response.status_code == 404:
             return await super().get_response("index.html", scope)
         return response

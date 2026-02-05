@@ -9,7 +9,7 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false
   },
-  base: './',
+  base: '/',
   server: {
     proxy: {
       '/api': {
