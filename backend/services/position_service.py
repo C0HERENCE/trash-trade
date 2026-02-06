@@ -190,6 +190,19 @@ class PositionService:
         if self._positions.get(sid) is None:
             return
         pos = self._positions[sid]
+
+        # If TP2 hits before TP1, record TP1 first so both trades appear.
+        if action.action == "TP2" and not pos.tp1_hit:
+            tp1 = pos.tp1_price
+            tp2 = pos.tp2_price
+            if tp1 is not None and tp2 is not None and abs(tp1 - tp2) > 1e-9:
+                await self.close_by_action(
+                    sid,
+                    ExitAction(action="TP1", price=tp1, reason="tp1"),
+                )
+            if self._positions.get(sid) is None:
+                return
+            pos = self._positions[sid]
         acc = self._accounts[sid]
         sim = self._profiles[sid].get("sim", {})
         fee_rate = float(sim.get("fee_rate", self._settings.sim.fee_rate))

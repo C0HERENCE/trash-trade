@@ -106,7 +106,7 @@ class MarketStateManager:
         # 15m
         bars_15m = self.buffers.buffer("15m").to_list()
         last_bar_15m = None
-        last_ind_map = None
+        last_ind_map: Dict[str, Dict[str, Any]] = {}
         if bars_15m:
             for bar in bars_15m:
                 last_bar_15m = bar
@@ -117,14 +117,19 @@ class MarketStateManager:
                 for sid, res_map in snaps.items():
                     if res_map is None:
                         continue
-                    ind1 = self.ind_1h_map.get(sid) or {
-                        "ema20_1h": None,
-                        "ema60_1h": None,
-                        "rsi14_1h": None,
-                        "close_1h": bar.close,
-                    }
                     indicators_map = {name: res.value for name, res in res_map.items() if res is not None}
-                    indicators_map.update(ind1)
+                    needs_1h = any(
+                        getattr(spec, "interval", None) == "1h"
+                        for spec in self.indicator_specs.get(sid, [])
+                    )
+                    if needs_1h:
+                        ind1 = self.ind_1h_map.get(sid) or {
+                            "ema20_1h": None,
+                            "ema60_1h": None,
+                            "rsi14_1h": None,
+                            "close_1h": bar.close,
+                        }
+                        indicators_map.update(ind1)
                     indicators_map["close_15m"] = bar.close
                     history_map = {name: res.history for name, res in res_map.items() if res is not None and res.history}
                     ctx_map[sid] = StrategyContext(
@@ -141,9 +146,9 @@ class MarketStateManager:
                         cooldown_bars_remaining=0,
                     )
                 # keep last_ind_map (first strategy) for initial stream push
-                first_sid, res_map = next(iter(snaps.items()))
-                if res_map:
-                    last_ind_map = {name: res.value for name, res in res_map.items() if res}
+                for sid, res_map in snaps.items():
+                    if res_map:
+                        last_ind_map[sid] = indicators_map
 
         # 推送初始快照
         if stream_store is not None:
@@ -160,11 +165,10 @@ class MarketStateManager:
                         "x": last_bar_15m.is_closed,
                     }
                 )
-            if last_ind_map is not None:
+            if last_ind_map:
                 await stream_store.update_snapshot(indicators_15m=last_ind_map)
             if self.ind_1h_map:
-                first = next(iter(self.ind_1h_map.values()))
-                await stream_store.update_snapshot(indicators_1h=first)
+                await stream_store.update_snapshot(indicators_1h=self.ind_1h_map)
 
         return {"ctx_map": ctx_map, "last_ind_map": last_ind_map}
 
@@ -210,26 +214,30 @@ class MarketStateManager:
                     "rsi14_1h": rsi_res.value,
                     "close_1h": bar.close,
                 }
-            first = next(iter(self.ind_1h_map.values()), None)
-            if first:
-                stream_updates["indicators_1h"] = first
+            if self.ind_1h_map:
+                stream_updates["indicators_1h"] = self.ind_1h_map
             return {"stream": stream_updates, "strategies": result}
 
         if interval != "15m":
             return {}
 
         # per-strategy processing
+        indicators_by_sid: Dict[str, Dict[str, Any]] = {}
         for sid, res_map in snaps.items():
-            ind1 = self.ind_1h_map.get(sid)
+            needs_1h = any(
+                getattr(spec, "interval", None) == "1h" for spec in self.indicator_specs.get(sid, [])
+            )
+            ind1 = self.ind_1h_map.get(sid) if needs_1h else None
             if res_map is None:
                 continue
-            if ind1 is None:
+            if needs_1h and ind1 is None:
                 # allow describe_conditions to run even if 1h not ready
                 ind1 = {"ema20_1h": None, "ema60_1h": None, "rsi14_1h": None, "close_1h": bar.close}
 
             # build indicators/history dynamically from results
             indicators_map = {name: res.value for name, res in res_map.items() if res is not None}
-            indicators_map.update(ind1)  # merge latest 1h values
+            if ind1:
+                indicators_map.update(ind1)  # merge latest 1h values
             indicators_map["close_15m"] = bar.close
 
             history_map = {
@@ -237,7 +245,7 @@ class MarketStateManager:
             }
 
             # store minimal stream snapshot (use full map for flexibility)
-            stream_updates["indicators_15m"] = indicators_map
+            indicators_by_sid[sid] = indicators_map
 
             ctx = StrategyContext(
                 timestamp=bar.close_time,
@@ -252,6 +260,9 @@ class MarketStateManager:
                 position=None,  # runtime 填充
                 cooldown_bars_remaining=0,  # runtime 填充
             )
-            result[sid] = {"ctx": ctx, "indicators": stream_updates["indicators_15m"]}
+            result[sid] = {"ctx": ctx, "indicators": indicators_map}
+
+        if indicators_by_sid:
+            stream_updates["indicators_15m"] = indicators_by_sid
 
         return {"stream": stream_updates, "strategies": result}

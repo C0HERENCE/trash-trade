@@ -76,31 +76,39 @@ class StrategyRunner:
                 await self._stream_store.update_snapshot(**payload)
             return
         if preview_maps:
-            first_sid, res_map = next(iter(preview_maps.items()))
-            if res_map:
-                payload["indicators_15m"] = {k: v.value for k, v in res_map.items() if v is not None}
-                payload["kline_15m"] = {
-                    "t": bar.open_time,
-                    "T": bar.close_time,
-                    "o": bar.open,
-                    "h": bar.high,
-                    "l": bar.low,
-                    "c": bar.close,
-                    "v": bar.volume,
-                    "x": bar.is_closed,
-                }
+            indicators_by_sid: Dict[str, Dict[str, Optional[float]]] = {}
+            for sid, res_map in preview_maps.items():
+                if not res_map:
+                    continue
+                indicators_by_sid[sid] = {k: v.value for k, v in res_map.items() if v is not None}
+            if indicators_by_sid:
+                payload["indicators_15m"] = indicators_by_sid
+            payload["kline_15m"] = {
+                "t": bar.open_time,
+                "T": bar.close_time,
+                "o": bar.open,
+                "h": bar.high,
+                "l": bar.low,
+                "c": bar.close,
+                "v": bar.volume,
+                "x": bar.is_closed,
+            }
         cond_updates: dict[str, dict] = {}
         for sid, strat in self._strategies.items():
             base_ctx = self._last_ctx.get(sid)
+            needs_1h = any(
+                getattr(spec, "interval", None) == "1h" for spec in self._state_mgr.indicator_specs.get(sid, [])
+            )
             if base_ctx is None:
                 indicators = {}
                 preview_res = preview_maps.get(sid) or {}
                 if preview_res:
                     indicators.update({k: v.value for k, v in preview_res.items()})
-                ind1 = self._state_mgr.ind_1h_map.get(sid)
-                if ind1 is None:
+                ind1 = self._state_mgr.ind_1h_map.get(sid) if needs_1h else None
+                if needs_1h and ind1 is None:
                     ind1 = {"ema20_1h": None, "ema60_1h": None, "rsi14_1h": None, "close_1h": bar.close}
-                indicators.update(ind1)
+                if ind1:
+                    indicators.update(ind1)
                 indicators["close_15m"] = bar.close
                 ctx = StrategyContext(
                     timestamp=bar.close_time,
@@ -222,6 +230,11 @@ class StrategyRunner:
         await self._portfolio.snapshot_equity()
 
     def _ind_ready(self, sid: str, ctx: StrategyContext) -> bool:
+        needs_1h = any(
+            getattr(spec, "interval", None) == "1h" for spec in self._state_mgr.indicator_specs.get(sid, [])
+        )
+        if not needs_1h:
+            return True
         return self._state_mgr.ind_1h_map.get(sid) is not None or all(
             k in (ctx.indicators or {}) for k in ("ema20_1h", "ema60_1h", "rsi14_1h", "close_1h")
         )

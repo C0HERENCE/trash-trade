@@ -51,8 +51,8 @@ class RuntimeStatus:
 class StreamSnapshot:
     ts: int
     kline_15m: Optional[Dict[str, Any]]
-    indicators_15m: Optional[Dict[str, Any]]
-    indicators_1h: Optional[Dict[str, Any]]
+    indicators_15m: Optional[Dict[str, Dict[str, Any]]]
+    indicators_1h: Optional[Dict[str, Dict[str, Any]]]
     last_signal: Optional[Dict[str, Any]]
     conditions: Dict[str, Dict[str, Any]]
 
@@ -105,8 +105,8 @@ class StreamStore:
     async def update_snapshot(
         self,
         kline_15m: Optional[Dict[str, Any]] = None,
-        indicators_15m: Optional[Dict[str, Any]] = None,
-        indicators_1h: Optional[Dict[str, Any]] = None,
+        indicators_15m: Optional[Dict[str, Dict[str, Any]]] = None,
+        indicators_1h: Optional[Dict[str, Dict[str, Any]]] = None,
         last_signal: Optional[Dict[str, Any]] = None,
         conditions: Optional[Dict[str, Any]] = None,
     ) -> None:
@@ -114,9 +114,19 @@ class StreamStore:
             if kline_15m is not None:
                 self._snapshot.kline_15m = kline_15m
             if indicators_15m is not None:
-                self._snapshot.indicators_15m = indicators_15m
+                if self._snapshot.indicators_15m is None:
+                    self._snapshot.indicators_15m = {}
+                for sid, ind in indicators_15m.items():
+                    if ind is None:
+                        continue
+                    self._snapshot.indicators_15m[sid] = ind
             if indicators_1h is not None:
-                self._snapshot.indicators_1h = indicators_1h
+                if self._snapshot.indicators_1h is None:
+                    self._snapshot.indicators_1h = {}
+                for sid, ind in indicators_1h.items():
+                    if ind is None:
+                        continue
+                    self._snapshot.indicators_1h[sid] = ind
             if last_signal is not None:
                 self._snapshot.last_signal = last_signal
             if conditions is not None and isinstance(conditions, dict):
@@ -142,6 +152,10 @@ class StreamStore:
         async with self._lock:
             if self._snapshot.last_signal and self._snapshot.last_signal.get("sid") == strategy_id:
                 self._snapshot.last_signal = None
+            if self._snapshot.indicators_15m and strategy_id in self._snapshot.indicators_15m:
+                del self._snapshot.indicators_15m[strategy_id]
+            if self._snapshot.indicators_1h and strategy_id in self._snapshot.indicators_1h:
+                del self._snapshot.indicators_1h[strategy_id]
             if self._snapshot.conditions and strategy_id in self._snapshot.conditions:
                 del self._snapshot.conditions[strategy_id]
             if self._events:
@@ -242,11 +256,16 @@ def _stream_to_dict(s: StreamSnapshot, events: List[Dict[str, Any]], sid: Option
         sig = {"t": "cond", "sid": sid, "c": cond}
     elif s.last_signal is not None:
         sig = s.last_signal
+    indicators_15m = s.indicators_15m
+    indicators_1h = s.indicators_1h
+    if sid:
+        indicators_15m = (s.indicators_15m or {}).get(sid)
+        indicators_1h = (s.indicators_1h or {}).get(sid)
     return {
         "ts": s.ts,
         "k": s.kline_15m,
-        "i15": s.indicators_15m,
-        "i1": s.indicators_1h,
+        "i15": indicators_15m,
+        "i1": indicators_1h,
         "sig": sig,
         "cond": cond,
         "ev": events,

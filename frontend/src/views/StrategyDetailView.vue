@@ -7,8 +7,7 @@ import Header from '../components/Header.vue'
 import AssetCard from '../components/AssetCard.vue'
 import PositionCard from '../components/PositionCard.vue'
 import RunCard from '../components/RunCard.vue'
-import Chart from '../components/Chart.vue'
-import SubChart from '../components/SubChart.vue'
+import ProChart from '../components/ProChart.vue'
 import ConditionsCard from '../components/ConditionsCard.vue'
 import TradesTable from '../components/TradesTable.vue'
 import LedgerTable from '../components/LedgerTable.vue'
@@ -35,7 +34,7 @@ const countdownTimer = ref(null)
 const remainingSec = ref(600)
 const streamKline = ref(null)
 const streamIndicators = ref(null)
-const streamEvents = ref([])
+const streamIndicatorsTs = ref(null)
 const tradesPage = ref(0)
 const ledgerPage = ref(0)
 const tradesHasMore = ref(false)
@@ -186,6 +185,13 @@ const applyStreamPayload = (payload) => {
     streamKline.value = payload.k
   }
   if (payload.i15) {
+    if (payload.k && payload.k.t) {
+      streamIndicatorsTs.value = payload.k.t
+    } else if (streamKline.value && streamKline.value.t) {
+      streamIndicatorsTs.value = streamKline.value.t
+    } else {
+      streamIndicatorsTs.value = null
+    }
     streamIndicators.value = payload.i15
   }
   if (payload.sig && payload.sig.t === 'cond') {
@@ -195,7 +201,6 @@ const applyStreamPayload = (payload) => {
   }
   if (payload.ev) {
     const evs = (payload.ev || []).filter(e => !e.sid || !currentStrategy.value || e.sid === currentStrategy.value)
-    streamEvents.value = evs.filter(e => ['entry', 'exit', 'tp1', 'tp2'].includes(e.type)).slice(-100)
     evs.forEach((e) => {
       if (e.type === 'trade') {
         const tradeKey = e.trade_id != null ? String(e.trade_id) : `${e.timestamp}-${e.side}-${e.price}-${e.qty}`
@@ -258,7 +263,7 @@ const clearLocalState = () => {
   conditions.value = { long: [], short: [] }
   streamKline.value = null
   streamIndicators.value = null
-  streamEvents.value = []
+  streamIndicatorsTs.value = null
   tradeIds.clear()
 }
 
@@ -461,17 +466,11 @@ onUnmounted(() => {
         <PositionCard :data="status" />
         <RunCard :data="status" :stats="stats" />
       </div>
-      <Chart 
-        :strategy="currentStrategy" 
-        :kline="streamKline" 
-        :indicators="streamIndicators" 
-        :events="streamEvents"
-        :position="status.position || {}"
-      />
-      <SubChart 
-        :strategy="currentStrategy" 
-        :kline="streamKline" 
-        :indicators="streamIndicators" 
+      <ProChart
+        :strategy="currentStrategy"
+        :kline="streamKline"
+        :indicators="streamIndicators"
+        :indicators-ts="streamIndicatorsTs"
       />
       <ConditionsCard :conditions="conditions" />
       <TradesTable 
